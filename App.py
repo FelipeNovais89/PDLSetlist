@@ -329,7 +329,7 @@ def render_editor():
             for it in bloco.itens:
                 with st.container():
                     # linha principal do item
-                    c0, c1, c2, c3, c4, c5, c6 = st.columns([2, 4, 2, 3, 1, 1, 1])
+                    c0, c1, c2, c3, c4, c5, c6 = st.columns([2, 4, 2, 3, 2, 0.1, 0.1])
 
                     picker_flag = f"song_picker_open_{it.id}"
                     tone_flag = f"tone_picker_open_{it.id}"
@@ -353,49 +353,56 @@ def render_editor():
                             nome = it.titulo or "(sem música)"
                             st.markdown(f"<b>{nome}</b>", unsafe_allow_html=True)
 
-                        # BPM
+                        # BPM com placeholder "BPM" quando vazio
                         with c2:
-                            bpm_val = st.number_input(
+                            bpm_str = st.text_input(
                                 "BPM",
-                                value=it.bpm if it.bpm is not None else 0,
+                                value=str(it.bpm) if it.bpm is not None else "",
                                 key=f"item_bpm_{it.id}",
                                 label_visibility="collapsed",
-                                step=1,
+                                placeholder="BPM",
                             )
-                            it.bpm = int(bpm_val) if bpm_val > 0 else None
+                            bpm_str = bpm_str.strip()
+                            if bpm_str == "":
+                                it.bpm = None
+                            else:
+                                try:
+                                    it.bpm = int(bpm_str)
+                                except ValueError:
+                                    pass
 
                         # TOM dentro de uma caixinha, com botões lado a lado
-                    with c3:
-                        base_tom = it.tom or "C"
-                        with st.container(border=True):
-                            # título "Tom"
-                            st.markdown(
-                                "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
-                                unsafe_allow_html=True,
-                            )
+                        with c3:
+                            base_tom = it.tom or "C"
+                            with st.container(border=True):
+                                st.markdown(
+                                    "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
+                                    unsafe_allow_html=True,
+                                )
 
-                            t1, t2, t3 = st.columns(3)
+                                t1, t2, t3 = st.columns(3)
 
-                            # botão -½ tom
-                            with t1:
-                                if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
-                                    it.tom = transpose_key(it.tom or base_tom, -1)
-                                    st.rerun()
+                                # botão -½ tom
+                                with t1:
+                                    if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
+                                        it.tom = transpose_key(it.tom or base_tom, -1)
+                                        st.rerun()
 
-                            # botão com o tom atual (abre seletor de tons)
-                            with t2:
-                                label_tom = it.tom or base_tom
-                                if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
-                                    st.session_state[tone_flag] = not st.session_state.get(
-                                        tone_flag, False
-                                    )
-                                    st.rerun()
+                                # botão com o tom atual (abre seletor de tons)
+                                with t2:
+                                    label_tom = it.tom or base_tom
+                                    if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
+                                        st.session_state[tone_flag] = not st.session_state.get(
+                                            tone_flag, False
+                                        )
+                                        st.rerun()
 
-                            # botão +½ tom
-                            with t3:
-                                if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
-                                    it.tom = transpose_key(it.tom or base_tom, +1)
-                                    st.rerun()
+                                # botão +½ tom
+                                with t3:
+                                    if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
+                                        it.tom = transpose_key(it.tom or base_tom, +1)
+                                        st.rerun()
+
                     else:  # PAUSA
                         with c0:
                             st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
@@ -418,10 +425,7 @@ def render_editor():
 
                     # botões mover / excluir do item (lado a lado)
                     with c4:
-                        st.markdown(
-                            "<div style='height:3px'></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
                         b_up, b_down, b_del = st.columns(3)
                         with b_up:
                             if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
@@ -436,7 +440,7 @@ def render_editor():
                                 delete_item(bloco.id, it.id)
                                 st.rerun()
 
-                    # c5 e c6 ficam vazios
+                    # c5 e c6 vazios (apenas para manter layout)
                     with c5:
                         st.markdown("")
                     with c6:
@@ -457,13 +461,11 @@ def render_editor():
                             with b1:
                                 if st.button("Confirmar", key=f"song_confirm_{it.id}"):
                                     if selecionadas:
-                                        # primeira música vai para este item
                                         first = selecionadas[0]
                                         it.titulo = first["titulo"]
                                         it.bpm = first["bpm"]
                                         it.tom = first["tom"]
 
-                                        # demais são adicionadas logo abaixo
                                         for extra in selecionadas[1:]:
                                             new_item = Item(
                                                 id=st.session_state.next_item_id,

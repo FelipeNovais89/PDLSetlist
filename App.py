@@ -368,28 +368,41 @@ def render_editor():
                             )
                             it.bpm = int(bpm_val) if bpm_val > 0 else None
 
-                        # TOM: -½ | [Tom] | +½
-                        with c3:
-                            base_tom = it.tom or "C"
-                            c_t1, c_t2, c_t3 = st.columns([1, 1, 1])
-                            with c_t1:
-                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
-                                if st.button("− ½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
-                                    it.tom = transpose_key(it.tom or base_tom, -1)
-                                    st.rerun()
-                            with c_t2:
-                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
-                                label_tom = it.tom or base_tom
-                                if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
-                                    st.session_state[tone_flag] = not st.session_state.get(
-                                        tone_flag, False
-                                    )
-                                    st.rerun()
-                            with c_t3:
-                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
-                                if st.button("+ ½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
-                                    it.tom = transpose_key(it.tom or base_tom, +1)
-                                    st.rerun()
+                        # TOM dentro de uma caixinha, com botões lado a lado
+        with c3:
+            base_tom = it.tom or "C"
+            with st.container(border=True):
+                # título "Tom"
+                st.markdown(
+                    "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
+                    unsafe_allow_html=True,
+                )
+
+                c_t1, c_t2, c_t3 = st.columns([1, 1, 1])
+
+                # botão -½ tom
+                with c_t1:
+                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                    if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
+                        it.tom = transpose_key(it.tom or base_tom, -1)
+                        st.rerun()
+
+                # botão com o tom atual (abre seletor)
+                with c_t2:
+                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                    label_tom = it.tom or base_tom
+                    if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
+                        st.session_state[tone_flag] = not st.session_state.get(
+                            tone_flag, False
+                        )
+                        st.rerun()
+
+                # botão +½ tom
+                with c_t3:
+                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                    if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
+                        it.tom = transpose_key(it.tom or base_tom, +1)
+                        st.rerun()
 
                     else:  # PAUSA
                         with c0:

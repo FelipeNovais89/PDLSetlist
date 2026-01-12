@@ -62,13 +62,6 @@ def init_state():
 # --------------------------------------------------------------------
 
 
-def get_song_from_db(title: str):
-    for song in SONG_DB:
-        if song["titulo"] == title:
-            return song
-    return None
-
-
 def add_bloco():
     nb = Bloco(
         id=st.session_state.next_bloco_id,
@@ -302,6 +295,7 @@ def render_editor():
 
     for bloco in st.session_state.blocos:
         with st.container(border=True):
+            # cabeçalho do bloco
             col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
             with col1:
                 novo_nome = st.text_input(
@@ -312,7 +306,7 @@ def render_editor():
                 )
                 bloco.nome = novo_nome or bloco.nome
 
-            # espaçamento maior para centralizar melhor
+            # botões do bloco (centralizados verticalmente)
             with col2:
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                 if st.button("↑", key=f"bloco_up_{bloco.id}", help="Mover bloco para cima"):
@@ -331,15 +325,17 @@ def render_editor():
 
             st.markdown("---")
 
+            # itens (músicas / pausas) do bloco
             for it in bloco.itens:
                 with st.container():
+                    # linha principal do item
                     c0, c1, c2, c3, c4, c5, c6 = st.columns([2, 4, 2, 3, 1, 1, 1])
 
                     picker_flag = f"song_picker_open_{it.id}"
                     tone_flag = f"tone_picker_open_{it.id}"
 
                     if it.tipo == "musica":
-                        # botão ESCOLHER
+                        # botão ESCOLHER (abre painel de músicas)
                         with c0:
                             st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
                             if st.button(
@@ -352,7 +348,7 @@ def render_editor():
                                 )
                                 st.rerun()
 
-                        # nome da música
+                        # nome da música (texto)
                         with c1:
                             nome = it.titulo or "(sem música)"
                             st.markdown(f"<b>{nome}</b>", unsafe_allow_html=True)
@@ -369,40 +365,40 @@ def render_editor():
                             it.bpm = int(bpm_val) if bpm_val > 0 else None
 
                         # TOM dentro de uma caixinha, com botões lado a lado
-        with c3:
-            base_tom = it.tom or "C"
-            with st.container(border=True):
-                # título "Tom"
-                st.markdown(
-                    "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
-                    unsafe_allow_html=True,
-                )
+                        with c3:
+                            base_tom = it.tom or "C"
+                            with st.container(border=True):
+                                # título "Tom"
+                                st.markdown(
+                                    "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
+                                    unsafe_allow_html=True,
+                                )
 
-                c_t1, c_t2, c_t3 = st.columns([1, 1, 1])
+                                t1, t2, t3 = st.columns([1, 1, 1])
 
-                # botão -½ tom
-                with c_t1:
-                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                    if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
-                        it.tom = transpose_key(it.tom or base_tom, -1)
-                        st.rerun()
+                                # botão -½ tom
+                                with t1:
+                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                                    if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
+                                        it.tom = transpose_key(it.tom or base_tom, -1)
+                                        st.rerun()
 
-                # botão com o tom atual (abre seletor)
-                with c_t2:
-                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                    label_tom = it.tom or base_tom
-                    if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
-                        st.session_state[tone_flag] = not st.session_state.get(
-                            tone_flag, False
-                        )
-                        st.rerun()
+                                # botão com o tom atual (abre seletor de tons)
+                                with t2:
+                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                                    label_tom = it.tom or base_tom
+                                    if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
+                                        st.session_state[tone_flag] = not st.session_state.get(
+                                            tone_flag, False
+                                        )
+                                        st.rerun()
 
-                # botão +½ tom
-                with c_t3:
-                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                    if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
-                        it.tom = transpose_key(it.tom or base_tom, +1)
-                        st.rerun()
+                                # botão +½ tom
+                                with t3:
+                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                                    if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
+                                        it.tom = transpose_key(it.tom or base_tom, +1)
+                                        st.rerun()
 
                     else:  # PAUSA
                         with c0:
@@ -424,7 +420,7 @@ def render_editor():
                         with c3:
                             st.markdown("")
 
-                    # botões mover/excluir, mais centralizados
+                    # botões mover / excluir do item (centralizados)
                     with c4:
                         st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                         if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
@@ -472,7 +468,6 @@ def render_editor():
                                                 tom=extra["tom"],
                                             )
                                             st.session_state.next_item_id += 1
-                                            # insere depois deste item
                                             for b in st.session_state.blocos:
                                                 if b.id == bloco.id:
                                                     idx = next(
@@ -481,7 +476,6 @@ def render_editor():
                                                         if it2.id == it.id
                                                     )
                                                     b.itens.insert(idx + 1, new_item)
-                                                    idx += 1
                                                     break
                                     st.session_state[picker_flag] = False
                                     st.rerun()
@@ -515,7 +509,7 @@ def render_editor():
                                     st.session_state[tone_flag] = False
                                     st.rerun()
 
-            # botões adicionar
+            # botões para adicionar música/pausa no bloco
             c_add1, c_add2 = st.columns(2)
             with c_add1:
                 if st.button("＋ Música", key=f"add_musica_{bloco.id}", use_container_width=True):
@@ -545,7 +539,6 @@ def render_preview(fullscreen=False):
     if not fullscreen:
         st.subheader("Preview")
 
-    if not fullscreen:
         c1, c2 = st.columns([1, 1])
         with c1:
             st.markdown(

@@ -5,8 +5,6 @@ from typing import List, Optional
 # --------------------------------------------------------------------
 # "BANCO DE DADOS" SIMPLES DE MÚSICAS (EDITÁVEL)
 # --------------------------------------------------------------------
-# Você pode alterar / adicionar músicas aqui.
-# Mais pra frente podemos puxar isso de CSV, planilha, etc.
 
 SONG_DB = [
     {"titulo": "Deixa Acontecer", "bpm": 100, "tom": "Fm"},
@@ -19,31 +17,29 @@ MINOR_KEYS = [k + "m" for k in MAJOR_KEYS]
 
 
 # --------------------------------------------------------------------
-# MODELOS DE DADOS EM MEMÓRIA
+# MODELOS DE DADOS
 # --------------------------------------------------------------------
 
 
 @dataclass
 class Item:
-    """Item dentro de um bloco (música ou pausa)."""
     id: int
     tipo: str  # "musica" ou "pausa"
     titulo: str = ""
     bpm: Optional[int] = None
     tom: str = ""
-    notas: str = ""  # no futuro: observações / cifra simplificada
+    notas: str = ""
 
 
 @dataclass
 class Bloco:
-    """Bloco de músicas."""
     id: int
     nome: str
     itens: List[Item] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------
-# INICIALIZAÇÃO DO ESTADO
+# ESTADO INICIAL
 # --------------------------------------------------------------------
 
 
@@ -53,14 +49,39 @@ def init_state():
         st.session_state.blocos: List[Bloco] = [bloco_inicial]
         st.session_state.next_bloco_id = 2
         st.session_state.next_item_id = 1
-        st.session_state.current_page_index = 0  # índice da página no preview
+        st.session_state.current_page_index = 0
         st.session_state.preview_mode = "Preview"
         st.session_state.fullscreen = False
 
+    # flags para diálogos
+    st.session_state.setdefault("song_picker_open", False)
+    st.session_state.setdefault("song_picker_bloco_id", None)
+    st.session_state.setdefault("song_picker_item_id", None)
+
+    st.session_state.setdefault("key_picker_open", False)
+    st.session_state.setdefault("key_picker_bloco_id", None)
+    st.session_state.setdefault("key_picker_item_id", None)
+
 
 # --------------------------------------------------------------------
-# FUNÇÕES AUXILIARES PARA MANIPULAR LISTA / DB
+# FUNÇÕES AUXILIARES
 # --------------------------------------------------------------------
+
+
+def get_song_from_db(title: str):
+    for song in SONG_DB:
+        if song["titulo"] == title:
+            return song
+    return None
+
+
+def find_item(bloco_id: int, item_id: int) -> Optional[Item]:
+    for b in st.session_state.blocos:
+        if b.id == bloco_id:
+            for it in b.itens:
+                if it.id == item_id:
+                    return it
+    return None
 
 
 def add_bloco():
@@ -74,12 +95,10 @@ def add_bloco():
 
 
 def delete_bloco(bloco_id: int):
-    blocos = st.session_state.blocos
-    st.session_state.blocos = [b for b in blocos if b.id != bloco_id]
+    st.session_state.blocos = [b for b in st.session_state.blocos if b.id != bloco_id]
 
 
 def move_bloco(bloco_id: int, direction: int):
-    """direction: -1 para cima, +1 para baixo"""
     blocos = st.session_state.blocos
     idx = next((i for i, b in enumerate(blocos) if b.id == bloco_id), None)
     if idx is None:
@@ -90,9 +109,7 @@ def move_bloco(bloco_id: int, direction: int):
 
 
 def add_item(bloco_id: int, tipo: str):
-    """Adiciona música ou pausa a um bloco."""
-    blocos = st.session_state.blocos
-    for b in blocos:
+    for b in st.session_state.blocos:
         if b.id == bloco_id:
             item = Item(
                 id=st.session_state.next_item_id,
@@ -114,7 +131,6 @@ def delete_item(bloco_id: int, item_id: int):
 
 
 def move_item(bloco_id: int, item_id: int, direction: int):
-    """Move item para cima/baixo dentro do bloco."""
     for b in st.session_state.blocos:
         if b.id == bloco_id:
             idx = next((i for i, it in enumerate(b.itens) if it.id == item_id), None)
@@ -126,28 +142,30 @@ def move_item(bloco_id: int, item_id: int, direction: int):
             break
 
 
-def get_song_from_db(title: str):
-    """Retorna dict da música no SONG_DB pelo título."""
-    for song in SONG_DB:
-        if song["titulo"] == title:
-            return song
-    return None
+def transpose_key(key: str, semitones: int) -> str:
+    """Sobe/desce meio tom (semitones pode ser -1 ou +1)."""
+    if not key:
+        key = "C"
+    is_minor = key.endswith("m")
+    base = key[:-1] if is_minor else key
+    keys = MAJOR_KEYS
+    try:
+        idx = keys.index(base)
+    except ValueError:
+        idx = 0
+    new_idx = (idx + semitones) % len(keys)
+    new_base = keys[new_idx]
+    return new_base + "m" if is_minor else new_base
 
 
 # --------------------------------------------------------------------
-# CONSTRUÇÃO DAS PÁGINAS PARA O PREVIEW
+# PÁGINAS DO PREVIEW
 # --------------------------------------------------------------------
 
 
 def build_pages():
-    """
-    Constrói uma lista linear de 'páginas' para o preview.
-    Cada música e cada pausa conta como uma página.
-    Também devolve uma estrutura com blocos -> índices de página,
-    para montar a barra inferior.
-    """
     pages = []
-    index_by_block = []  # lista de (bloco, [indices_de_pages])
+    index_by_block = []
 
     page_idx = 0
     for bloco in st.session_state.blocos:
@@ -162,12 +180,11 @@ def build_pages():
 
 
 # --------------------------------------------------------------------
-# RENDER DO PREVIEW (UMA PÁGINA)
+# PREVIEW - UMA PÁGINA
 # --------------------------------------------------------------------
 
 
 def render_page(page):
-    """Renderiza a página atual (música ou pausa) no preview."""
     if page is None:
         st.markdown(
             "<div style='padding:2rem; text-align:center; color:#888;'>"
@@ -180,7 +197,6 @@ def render_page(page):
     bloco: Bloco = page["bloco"]
     item: Item = page["item"]
 
-    # Caixa branca simulando folha
     st.markdown(
         """
         <style>
@@ -240,13 +256,12 @@ def render_page(page):
         unsafe_allow_html=True,
     )
 
-    musica_atual = item.titulo or ("PAUSA" if item.tipo == "pausa" else "Música sem nome")
-    banda_atual = bloco.nome  # por enquanto usamos o nome do bloco como "banda"
+    musica_atual = item.titulo or ("PAUSA" if item.tipo == "pausa" else "MÚSICA SEM NOME")
+    banda_atual = bloco.nome
 
     tom_atual = item.tom or "-"
     bpm_atual = item.bpm if item.bpm is not None else "-"
 
-    # Próxima página (para rodapé)
     pages, _ = build_pages()
     current_idx = page["page_idx"]
     if current_idx + 1 < len(pages):
@@ -283,12 +298,86 @@ def render_page(page):
       </div>
     </div>
     """
-
     st.markdown(html, unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------
-# UI: EDITOR DE SETLIST (LADO ESQUERDO)
+# DIÁLOGO: ESCOLHER MÚSICA
+# --------------------------------------------------------------------
+
+
+@st.dialog("Selecionar música")
+def song_picker_dialog():
+    bloco_id = st.session_state.song_picker_bloco_id
+    item_id = st.session_state.song_picker_item_id
+    item = find_item(bloco_id, item_id)
+
+    if item is None:
+        st.write("Item não encontrado.")
+        if st.button("Fechar"):
+            st.session_state.song_picker_open = False
+            st.rerun()
+        return
+
+    nomes = [s["titulo"] for s in SONG_DB]
+    idx_atual = nomes.index(item.titulo) if item.titulo in nomes else 0
+    escolha = st.radio("Escolha a música:", nomes, index=idx_atual)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Confirmar"):
+            song = get_song_from_db(escolha)
+            item.titulo = escolha
+            if song:
+                item.bpm = song["bpm"]
+                item.tom = song["tom"]
+            st.session_state.song_picker_open = False
+            st.rerun()
+    with col2:
+        if st.button("Cancelar"):
+            st.session_state.song_picker_open = False
+            st.rerun()
+
+
+# --------------------------------------------------------------------
+# DIÁLOGO: ESCOLHER TOM
+# --------------------------------------------------------------------
+
+
+@st.dialog("Selecionar tom")
+def key_picker_dialog():
+    bloco_id = st.session_state.key_picker_bloco_id
+    item_id = st.session_state.key_picker_item_id
+    item = find_item(bloco_id, item_id)
+
+    if item is None:
+        st.write("Item não encontrado.")
+        if st.button("Fechar"):
+            st.session_state.key_picker_open = False
+            st.rerun()
+        return
+
+    base_tom = item.tom or "C"
+    is_minor = base_tom.endswith("m")
+    keys = MINOR_KEYS if is_minor else MAJOR_KEYS
+
+    idx_atual = keys.index(base_tom) if base_tom in keys else 0
+    escolha = st.radio("Escolha o tom:", keys, index=idx_atual)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Confirmar"):
+            item.tom = escolha
+            st.session_state.key_picker_open = False
+            st.rerun()
+    with col2:
+        if st.button("Cancelar"):
+            st.session_state.key_picker_open = False
+            st.rerun()
+
+
+# --------------------------------------------------------------------
+# EDITOR (LADO ESQUERDO)
 # --------------------------------------------------------------------
 
 
@@ -303,7 +392,6 @@ def render_editor():
 
     for bloco in st.session_state.blocos:
         with st.container(border=True):
-            # Cabeçalho do bloco
             col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
             with col1:
                 novo_nome = st.text_input(
@@ -314,56 +402,47 @@ def render_editor():
                 )
                 bloco.nome = novo_nome or bloco.nome
 
+            # pequeno espaçamento para "centralizar" os botões
             with col2:
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 if st.button("↑", key=f"bloco_up_{bloco.id}", help="Mover bloco para cima"):
                     move_bloco(bloco.id, -1)
                     st.rerun()
             with col3:
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 if st.button("↓", key=f"bloco_down_{bloco.id}", help="Mover bloco para baixo"):
                     move_bloco(bloco.id, +1)
                     st.rerun()
             with col4:
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 if st.button("✖", key=f"bloco_del_{bloco.id}", help="Excluir bloco"):
                     delete_bloco(bloco.id)
                     st.rerun()
 
             st.markdown("---")
 
-            # Itens (músicas / pausas)
+            # Itens do bloco
             for it in bloco.itens:
                 with st.container():
-                    c1, c2, c3, c4, c5, c6 = st.columns([4, 2, 2, 1, 1, 1])
+                    # mais uma coluna pro botão "Escolher música"
+                    c0, c1, c2, c3, c4, c5, c6 = st.columns([2, 4, 2, 3, 1, 1, 1])
 
-                    # ---- Música: escolhe do DB ----
                     if it.tipo == "musica":
+                        with c0:
+                            st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
+                            if st.button(
+                                "Escolher",
+                                key=f"pick_song_{it.id}",
+                                help="Selecionar música do banco",
+                            ):
+                                st.session_state.song_picker_open = True
+                                st.session_state.song_picker_bloco_id = bloco.id
+                                st.session_state.song_picker_item_id = it.id
+                                st.rerun()
+
                         with c1:
-                            options = ["(selecione música)"] + [s["titulo"] for s in SONG_DB]
-                            try:
-                                current_index = (
-                                    options.index(it.titulo)
-                                    if it.titulo in options
-                                    else 0
-                                )
-                            except ValueError:
-                                current_index = 0
-
-                            selected = st.selectbox(
-                                "Música",
-                                options,
-                                index=current_index,
-                                key=f"item_song_{it.id}",
-                                label_visibility="collapsed",
-                            )
-
-                            if selected != "(selecione música)":
-                                it.titulo = selected
-                                song = get_song_from_db(selected)
-                                if song:
-                                    # Preenche bpm/tom se ainda não definidos
-                                    if it.bpm is None:
-                                        it.bpm = song["bpm"]
-                                    if not it.tom:
-                                        it.tom = song["tom"]
+                            nome = it.titulo or "(sem música)"
+                            st.markdown(f"<b>{nome}</b>", unsafe_allow_html=True)
 
                         with c2:
                             bpm_val = st.number_input(
@@ -376,29 +455,33 @@ def render_editor():
                             it.bpm = int(bpm_val) if bpm_val > 0 else None
 
                         with c3:
-                            base_tom = it.tom or ""
-                            # escolhe lista de tons com base em ser maior/menor
-                            if base_tom.endswith("m"):
-                                key_list = MINOR_KEYS
-                            else:
-                                key_list = MAJOR_KEYS
-                            # índice atual
-                            try:
-                                idx_tom = key_list.index(base_tom) if base_tom in key_list else 0
-                            except ValueError:
-                                idx_tom = 0
+                            base_tom = it.tom or "C"
+                            is_minor = base_tom.endswith("m")
+                            # linha tipo: - ½ | [Tom] | + ½
+                            c_t1, c_t2, c_t3 = st.columns([1, 1, 1])
+                            with c_t1:
+                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
+                                if st.button("− ½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
+                                    it.tom = transpose_key(it.tom or base_tom, -1)
+                                    st.rerun()
+                            with c_t2:
+                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
+                                label_tom = it.tom or base_tom
+                                if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
+                                    st.session_state.key_picker_open = True
+                                    st.session_state.key_picker_bloco_id = bloco.id
+                                    st.session_state.key_picker_item_id = it.id
+                                    st.rerun()
+                            with c_t3:
+                                st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
+                                if st.button("+ ½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
+                                    it.tom = transpose_key(it.tom or base_tom, +1)
+                                    st.rerun()
 
-                            sel_tom = st.selectbox(
-                                "Tom",
-                                key_list,
-                                index=idx_tom,
-                                key=f"item_tom_{it.id}",
-                                label_visibility="collapsed",
-                            )
-                            it.tom = sel_tom
-
-                    # ---- Pausa ----
-                    else:
+                    else:  # PAUSA
+                        with c0:
+                            st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
+                            st.markdown("Pausa")
                         with c1:
                             novo_titulo = st.text_input(
                                 f"Pausa {it.id}",
@@ -415,21 +498,24 @@ def render_editor():
                         with c3:
                             st.markdown("")
 
-                    # Botões mover/excluir
+                    # botões mover/excluir
                     with c4:
+                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                         if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
                             move_item(bloco.id, it.id, -1)
                             st.rerun()
                     with c5:
+                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                         if st.button("↓", key=f"item_down_{it.id}", help="Mover para baixo"):
                             move_item(bloco.id, it.id, +1)
                             st.rerun()
                     with c6:
+                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                         if st.button("✖", key=f"item_del_{it.id}", help="Excluir item"):
                             delete_item(bloco.id, it.id)
                             st.rerun()
 
-            # Botões para adicionar música/pausa (agora com mesmo tamanho)
+            # botões adicionar
             c_add1, c_add2 = st.columns(2)
             with c_add1:
                 if st.button("＋ Música", key=f"add_musica_{bloco.id}", use_container_width=True):
@@ -442,7 +528,7 @@ def render_editor():
 
 
 # --------------------------------------------------------------------
-# UI: PREVIEW (LADO DIREITO)
+# PREVIEW (LADO DIREITO)
 # --------------------------------------------------------------------
 
 
@@ -450,11 +536,8 @@ def render_preview(fullscreen=False):
     pages, index_by_block = build_pages()
 
     if pages:
-        # Garante que o índice atual é válido
         if st.session_state.current_page_index >= len(pages):
-            st.session_state.current_page_index = min(
-                st.session_state.current_page_index, len(pages) - 1
-            )
+            st.session_state.current_page_index = len(pages) - 1
         current_page = pages[st.session_state.current_page_index]
     else:
         current_page = None
@@ -462,13 +545,11 @@ def render_preview(fullscreen=False):
     if not fullscreen:
         st.subheader("Preview")
 
-    # Botão Tela Cheia (apenas fora do modo fullscreen)
     if not fullscreen:
         c1, c2 = st.columns([1, 1])
         with c1:
-            mode_label = "Preview ▼"
             st.markdown(
-                f"<div style='font-size:12px;color:#aaa;'>{mode_label}</div>",
+                "<div style='font-size:12px;color:#aaa;'>Preview ▼</div>",
                 unsafe_allow_html=True,
             )
         with c2:
@@ -476,13 +557,10 @@ def render_preview(fullscreen=False):
                 st.session_state.fullscreen = True
                 st.rerun()
 
-    # Render da página
     render_page(current_page)
 
     if not fullscreen:
         st.markdown("")
-
-        # Barra inferior com blocos e páginas
         st.markdown(
             "<div style='margin-top:12px;font-size:11px;color:#aaa;'>"
             "Navegação por blocos e páginas:"
@@ -518,12 +596,16 @@ def main():
     st.set_page_config(page_title="PDL Setlist", layout="wide")
     init_state()
 
+    # abre diálogos se necessário
+    if st.session_state.song_picker_open:
+        song_picker_dialog()
+    if st.session_state.key_picker_open:
+        key_picker_dialog()
+
     if st.session_state.fullscreen:
-        # Modo de tela cheia: só o preview
         st.button("⬅ Voltar", on_click=exit_fullscreen, key="back_full")
         render_preview(fullscreen=True)
     else:
-        # Topo
         st.markdown(
             "<div style='font-size:14px; margin-bottom:8px;'>"
             "<b>Setlist:</b> Pagode do LEC - Lisboa 2026"
@@ -532,10 +614,8 @@ def main():
         )
 
         col_left, col_right = st.columns([1.1, 1.4])
-
         with col_left:
             render_editor()
-
         with col_right:
             render_preview(fullscreen=False)
 

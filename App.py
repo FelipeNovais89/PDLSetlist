@@ -101,9 +101,7 @@ def move_item(bloco_id: int, item_id: int, direction: int):
     """Move item para cima/baixo dentro do bloco."""
     for b in st.session_state.blocos:
         if b.id == bloco_id:
-            idx = next((i for i, it in enumerate(b.itens) if it.id == item_id), None)
-            if idx is None:
-                return
+            idx = next((i, it) for i, it in enumerate(b.itens) if it.id == item_id)[0]
             new_idx = idx + direction
             if 0 <= new_idx < len(b.itens):
                 b.itens[idx], b.itens[new_idx] = b.itens[new_idx], b.itens[idx]
@@ -295,15 +293,15 @@ def render_editor():
             with col2:
                 if st.button("↑", key=f"bloco_up_{bloco.id}", help="Mover bloco para cima"):
                     move_bloco(bloco.id, -1)
-                    st.experimental_rerun()
+                    st.rerun()
             with col3:
                 if st.button("↓", key=f"bloco_down_{bloco.id}", help="Mover bloco para baixo"):
                     move_bloco(bloco.id, +1)
-                    st.experimental_rerun()
+                    st.rerun()
             with col4:
                 if st.button("✖", key=f"bloco_del_{bloco.id}", help="Excluir bloco"):
                     delete_bloco(bloco.id)
-                    st.experimental_rerun()
+                    st.rerun()
 
             st.markdown("---")
 
@@ -332,7 +330,10 @@ def render_editor():
                             )
                             it.bpm = int(bpm_val) if bpm_val > 0 else None
                         else:
-                            st.markdown("<div style='font-size:11px;color:#aaa;'>Pausa</div>", unsafe_allow_html=True)
+                            st.markdown(
+                                "<div style='font-size:11px;color:#aaa;'>Pausa</div>",
+                                unsafe_allow_html=True,
+                            )
 
                     with c3:
                         if it.tipo == "musica":
@@ -350,26 +351,26 @@ def render_editor():
                     with c4:
                         if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
                             move_item(bloco.id, it.id, -1)
-                            st.experimental_rerun()
+                            st.rerun()
                     with c5:
                         if st.button("↓", key=f"item_down_{it.id}", help="Mover para baixo"):
                             move_item(bloco.id, it.id, +1)
-                            st.experimental_rerun()
+                            st.rerun()
                     with c6:
                         if st.button("✖", key=f"item_del_{it.id}", help="Excluir item"):
                             delete_item(bloco.id, it.id)
-                            st.experimental_rerun()
+                            st.rerun()
 
             # Botões para adicionar música/pausa
             c_add1, c_add2, _ = st.columns([2, 2, 6])
             with c_add1:
                 if st.button("＋ Música", key=f"add_musica_{bloco.id}"):
                     add_item(bloco.id, "musica")
-                    st.experimental_rerun()
+                    st.rerun()
             with c_add2:
                 if st.button("＋ Pausa", key=f"add_pausa_{bloco.id}"):
                     add_item(bloco.id, "pausa")
-                    st.experimental_rerun()
+                    st.rerun()
 
 
 # --------------------------------------------------------------------
@@ -396,11 +397,14 @@ def render_preview(fullscreen=False):
         c1, c2 = st.columns([1, 1])
         with c1:
             mode_label = "Preview ▼"
-            st.markdown(f"<div style='font-size:12px;color:#aaa;'>{mode_label}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:12px;color:#aaa;'>{mode_label}</div>",
+                unsafe_allow_html=True,
+            )
         with c2:
             if st.button("🗖 Tela cheia", use_container_width=True):
                 st.session_state.fullscreen = True
-                st.experimental_rerun()
+                st.rerun()
 
     # Render da página
     render_page(current_page)
@@ -410,7 +414,9 @@ def render_preview(fullscreen=False):
 
         # Barra inferior com blocos e páginas
         st.markdown(
-            "<div style='margin-top:12px;font-size:11px;color:#aaa;'>Navegação por blocos e páginas:</div>",
+            "<div style='margin-top:12px;font-size:11px;color:#aaa;'>"
+            "Navegação por blocos e páginas:"
+            "</div>",
             unsafe_allow_html=True,
         )
         for bloco, page_indices in index_by_block:
@@ -426,12 +432,16 @@ def render_preview(fullscreen=False):
                 with col:
                     if st.button(short, key=f"goto_{p_idx}"):
                         st.session_state.current_page_index = p_idx
-                        st.experimental_rerun()
+                        st.rerun()
 
 
 # --------------------------------------------------------------------
 # MAIN
 # --------------------------------------------------------------------
+
+
+def exit_fullscreen():
+    st.session_state.fullscreen = False
 
 
 def main():
@@ -440,7 +450,7 @@ def main():
 
     if st.session_state.fullscreen:
         # Modo de tela cheia: só o preview
-        st.button("⬅ Voltar", on_click=lambda: exit_fullscreen(), key="back_full")
+        st.button("⬅ Voltar", on_click=exit_fullscreen, key="back_full")
         render_preview(fullscreen=True)
     else:
         # Topo
@@ -458,10 +468,6 @@ def main():
 
         with col_right:
             render_preview(fullscreen=False)
-
-
-def exit_fullscreen():
-    st.session_state.fullscreen = False
 
 
 if __name__ == "__main__":

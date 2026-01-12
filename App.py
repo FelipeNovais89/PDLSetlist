@@ -365,41 +365,37 @@ def render_editor():
                             it.bpm = int(bpm_val) if bpm_val > 0 else None
 
                         # TOM dentro de uma caixinha, com botões lado a lado
-                        with c3:
-                            base_tom = it.tom or "C"
-                            with st.container(border=True):
-                                # título "Tom"
-                                st.markdown(
-                                    "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
-                                    unsafe_allow_html=True,
-                                )
+                    with c3:
+                        base_tom = it.tom or "C"
+                        with st.container(border=True):
+                            # título "Tom"
+                            st.markdown(
+                                "<div style='font-size:11px; text-align:center; margin-bottom:4px;'>Tom</div>",
+                                unsafe_allow_html=True,
+                            )
 
-                                t1, t2, t3 = st.columns([1, 1, 1])
+                            t1, t2, t3 = st.columns(3)
 
-                                # botão -½ tom
-                                with t1:
-                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                                    if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
-                                        it.tom = transpose_key(it.tom or base_tom, -1)
-                                        st.rerun()
+                            # botão -½ tom
+                            with t1:
+                                if st.button("−½", key=f"tone_down_{it.id}", help="Descer ½ tom"):
+                                    it.tom = transpose_key(it.tom or base_tom, -1)
+                                    st.rerun()
 
-                                # botão com o tom atual (abre seletor de tons)
-                                with t2:
-                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                                    label_tom = it.tom or base_tom
-                                    if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
-                                        st.session_state[tone_flag] = not st.session_state.get(
-                                            tone_flag, False
-                                        )
-                                        st.rerun()
+                            # botão com o tom atual (abre seletor de tons)
+                            with t2:
+                                label_tom = it.tom or base_tom
+                                if st.button(label_tom, key=f"tone_pick_{it.id}", help="Escolher tom"):
+                                    st.session_state[tone_flag] = not st.session_state.get(
+                                        tone_flag, False
+                                    )
+                                    st.rerun()
 
-                                # botão +½ tom
-                                with t3:
-                                    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                                    if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
-                                        it.tom = transpose_key(it.tom or base_tom, +1)
-                                        st.rerun()
-
+                            # botão +½ tom
+                            with t3:
+                                if st.button("+½", key=f"tone_up_{it.id}", help="Subir ½ tom"):
+                                    it.tom = transpose_key(it.tom or base_tom, +1)
+                                    st.rerun()
                     else:  # PAUSA
                         with c0:
                             st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
@@ -420,22 +416,31 @@ def render_editor():
                         with c3:
                             st.markdown("")
 
-                    # botões mover / excluir do item (centralizados)
+                    # botões mover / excluir do item (lado a lado)
                     with c4:
-                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-                        if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
-                            move_item(bloco.id, it.id, -1)
-                            st.rerun()
+                        st.markdown(
+                            "<div style='height:3px'></div>",
+                            unsafe_allow_html=True,
+                        )
+                        b_up, b_down, b_del = st.columns(3)
+                        with b_up:
+                            if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
+                                move_item(bloco.id, it.id, -1)
+                                st.rerun()
+                        with b_down:
+                            if st.button("↓", key=f"item_down_{it.id}", help="Mover para baixo"):
+                                move_item(bloco.id, it.id, +1)
+                                st.rerun()
+                        with b_del:
+                            if st.button("✖", key=f"item_del_{it.id}", help="Excluir item"):
+                                delete_item(bloco.id, it.id)
+                                st.rerun()
+
+                    # c5 e c6 ficam vazios
                     with c5:
-                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-                        if st.button("↓", key=f"item_down_{it.id}", help="Mover para baixo"):
-                            move_item(bloco.id, it.id, +1)
-                            st.rerun()
+                        st.markdown("")
                     with c6:
-                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-                        if st.button("✖", key=f"item_del_{it.id}", help="Excluir item"):
-                            delete_item(bloco.id, it.id)
-                            st.rerun()
+                        st.markdown("")
 
                     # painel de seleção de músicas (checkbox múltiplo)
                     if st.session_state.get(picker_flag, False) and it.tipo == "musica":

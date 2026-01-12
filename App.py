@@ -53,6 +53,9 @@ def init_state():
         st.session_state.preview_mode = "Preview"
         st.session_state.fullscreen = False
 
+    if "layout_mode" not in st.session_state:
+        st.session_state.layout_mode = "Lado a lado"  # ou "Empilhado"
+
 
 # --------------------------------------------------------------------
 # FUNÇÕES AUXILIARES
@@ -309,19 +312,19 @@ def render_editor():
                 )
                 bloco.nome = novo_nome or bloco.nome
 
-            # espaçamento pra centralizar
+            # espaçamento maior para centralizar melhor
             with col2:
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                 if st.button("↑", key=f"bloco_up_{bloco.id}", help="Mover bloco para cima"):
                     move_bloco(bloco.id, -1)
                     st.rerun()
             with col3:
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                 if st.button("↓", key=f"bloco_down_{bloco.id}", help="Mover bloco para baixo"):
                     move_bloco(bloco.id, +1)
                     st.rerun()
             with col4:
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                 if st.button("✖", key=f"bloco_del_{bloco.id}", help="Excluir bloco"):
                     delete_bloco(bloco.id)
                     st.rerun()
@@ -330,7 +333,6 @@ def render_editor():
 
             for it in bloco.itens:
                 with st.container():
-                    # colunas da linha principal
                     c0, c1, c2, c3, c4, c5, c6 = st.columns([2, 4, 2, 3, 1, 1, 1])
 
                     picker_flag = f"song_picker_open_{it.id}"
@@ -343,7 +345,7 @@ def render_editor():
                             if st.button(
                                 "Escolher",
                                 key=f"pick_song_{it.id}",
-                                help="Selecionar música do banco",
+                                help="Selecionar músicas do banco",
                             ):
                                 st.session_state[picker_flag] = not st.session_state.get(
                                     picker_flag, False
@@ -409,43 +411,65 @@ def render_editor():
                         with c3:
                             st.markdown("")
 
-                    # botões mover/excluir, centralizados
+                    # botões mover/excluir, mais centralizados
                     with c4:
-                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                         if st.button("↑", key=f"item_up_{it.id}", help="Mover para cima"):
                             move_item(bloco.id, it.id, -1)
                             st.rerun()
                     with c5:
-                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                         if st.button("↓", key=f"item_down_{it.id}", help="Mover para baixo"):
                             move_item(bloco.id, it.id, +1)
                             st.rerun()
                     with c6:
-                        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
                         if st.button("✖", key=f"item_del_{it.id}", help="Excluir item"):
                             delete_item(bloco.id, it.id)
                             st.rerun()
 
-                    # painel de seleção de música (abre logo abaixo da linha)
+                    # painel de seleção de músicas (checkbox múltiplo)
                     if st.session_state.get(picker_flag, False) and it.tipo == "musica":
                         with st.container():
-                            st.markdown("**Selecionar música:**")
-                            nomes = [s["titulo"] for s in SONG_DB]
-                            idx_atual = nomes.index(it.titulo) if it.titulo in nomes else 0
-                            escolha = st.radio(
-                                "Música",
-                                nomes,
-                                index=idx_atual,
-                                key=f"song_radio_{it.id}",
-                            )
+                            st.markdown("**Selecionar músicas:**")
+                            selecionadas = []
+                            for song in SONG_DB:
+                                key_cb = f"song_cb_{it.id}_{song['titulo']}"
+                                checked = st.checkbox(song["titulo"], key=key_cb)
+                                if checked:
+                                    selecionadas.append(song)
+
                             b1, b2 = st.columns(2)
                             with b1:
                                 if st.button("Confirmar", key=f"song_confirm_{it.id}"):
-                                    song = get_song_from_db(escolha)
-                                    it.titulo = escolha
-                                    if song:
-                                        it.bpm = song["bpm"]
-                                        it.tom = song["tom"]
+                                    if selecionadas:
+                                        # primeira música vai para este item
+                                        first = selecionadas[0]
+                                        it.titulo = first["titulo"]
+                                        it.bpm = first["bpm"]
+                                        it.tom = first["tom"]
+
+                                        # demais são adicionadas logo abaixo
+                                        for extra in selecionadas[1:]:
+                                            new_item = Item(
+                                                id=st.session_state.next_item_id,
+                                                tipo="musica",
+                                                titulo=extra["titulo"],
+                                                bpm=extra["bpm"],
+                                                tom=extra["tom"],
+                                            )
+                                            st.session_state.next_item_id += 1
+                                            # insere depois deste item
+                                            for b in st.session_state.blocos:
+                                                if b.id == bloco.id:
+                                                    idx = next(
+                                                        i
+                                                        for i, it2 in enumerate(b.itens)
+                                                        if it2.id == it.id
+                                                    )
+                                                    b.itens.insert(idx + 1, new_item)
+                                                    idx += 1
+                                                    break
                                     st.session_state[picker_flag] = False
                                     st.rerun()
                             with b2:
@@ -453,7 +477,7 @@ def render_editor():
                                     st.session_state[picker_flag] = False
                                     st.rerun()
 
-                    # painel de seleção de tom (abre abaixo da linha)
+                    # painel de seleção de tom (lista de tons)
                     if st.session_state.get(tone_flag, False) and it.tipo == "musica":
                         with st.container():
                             st.markdown("**Selecionar tom:**")
@@ -559,6 +583,15 @@ def main():
     st.set_page_config(page_title="PDL Setlist", layout="wide")
     init_state()
 
+    # seletor de layout (lado a lado / empilhado)
+    layout = st.radio(
+        "Layout",
+        ["Lado a lado", "Empilhado"],
+        index=0 if st.session_state.layout_mode == "Lado a lado" else 1,
+        horizontal=True,
+    )
+    st.session_state.layout_mode = layout
+
     if st.session_state.fullscreen:
         st.button("⬅ Voltar", on_click=exit_fullscreen, key="back_full")
         render_preview(fullscreen=True)
@@ -570,10 +603,16 @@ def main():
             unsafe_allow_html=True,
         )
 
-        col_left, col_right = st.columns([1.1, 1.4])
-        with col_left:
+        if st.session_state.layout_mode == "Lado a lado":
+            col_left, col_right = st.columns([1.1, 1.4])
+            with col_left:
+                render_editor()
+            with col_right:
+                render_preview(fullscreen=False)
+        else:
+            # Empilhado: editor em cima, preview embaixo
             render_editor()
-        with col_right:
+            st.markdown("---")
             render_preview(fullscreen=False)
 
 

@@ -269,7 +269,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
         .sheet-header {{
             display: grid;
-            grid-template-columns: 2fr 1fr 0.5fr;
+            grid-template-columns: 2fr 1fr 0.25fr;
             align-items: center;
             padding: 4px 4px 8px;
             border-bottom: 1px solid #ccc;
@@ -287,7 +287,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;
-            font-size: 8px;
+            font-size: 6px;
         }}
         .sheet-label {{
             font-weight: 700;
@@ -297,7 +297,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 8px;
+            font-size: 6px;
         }}
 
         .sheet-body {{

@@ -344,7 +344,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         /* Bloco TOM / BPM no rodapé (header) */
         .sheet-next-tombpm-header {{
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 0.25fr;
             column-gap: 4pt;
             min-width: 70px;
             margin-right: 16px;  /* puxa um pouco pra esquerda */
@@ -365,7 +365,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
         .sheet-next-tombpm-values {{
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 0.25fr;
             column-gap: 4pt;
             min-width: 70px;
             margin-right: 16px;
@@ -384,7 +384,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
 
         .sheet-next-pause {{
-            font-size: 8px;
+            font-size: 12px;
             font-weight: 700;
         }}
 
@@ -400,7 +400,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
 
         .sheet-endblock-text {{
-            font-size: 8px;
+            font-size: 12px;
             font-weight: 700;
         }}
 

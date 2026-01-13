@@ -294,7 +294,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             font-size: 8px;
         }}
         .sheet-value {{
-            text-align: center;
+            text-align: right;
             font-weight: 400;
             font-size: 8px;
         }}

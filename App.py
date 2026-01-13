@@ -68,7 +68,7 @@ def init_state():
         st.session_state.current_item = None
 
     if "setlist_name" not in st.session_state:
-        st.session_state.setlist_name = "Pagode do LEC - Lisboa 2026"
+        st.session_state.setlist_name = "Pagode do LEC"
 
 
 # --------------------------------------------------------------------

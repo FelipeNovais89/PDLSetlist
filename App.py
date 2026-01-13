@@ -125,6 +125,11 @@ def build_sheet_header_html(title, artist, tom, bpm):
 
 
 def build_footer_html(next_title, next_artist, next_tone, next_bpm):
+    """Rodapé no formato:
+       PRÓXIMA:
+       Deixa a Vida Me Levar              TOM   BPM
+       Zeca Pagodinho                     D     115
+    """
     if not next_title:
         # Sem próxima música – fim do setlist
         return """
@@ -133,9 +138,8 @@ def build_footer_html(next_title, next_artist, next_tone, next_bpm):
         </div>
         """
 
-    # Próxima é uma música normal
     tone_text = next_tone or "-"
-    bpm_text = str(next_bpm) if next_bpm is not None else "-"
+    bpm_text = str(next_bpm) if next_bpm is not None and next_bpm != "" else "-"
 
     return f"""
     <div class="sheet-footer">
@@ -161,6 +165,7 @@ def build_footer_html(next_title, next_artist, next_tone, next_bpm):
 
 
 def build_sheet_page_html(item, next_item, block_name):
+    # Dados da música/pausa atual
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
         artist = block_name
@@ -177,16 +182,33 @@ def build_sheet_page_html(item, next_item, block_name):
             "CIFRA / TEXTO AQUI (ainda não cadastrado).",
         )
 
+    # Próximo item (para o rodapé)
+    if next_item is None:
+        next_title = None
+        next_artist = None
+        next_tone = None
+        next_bpm = None
+    elif next_item["type"] == "pause":
+        next_title = "PAUSA"
+        next_artist = ""
+        next_tone = ""
+        next_bpm = ""
+    else:
+        next_title = next_item.get("title", "")
+        next_artist = next_item.get("artist", "")
+        next_tone = next_item.get("tom", "")
+        next_bpm = next_item.get("bpm", "")
+
     header_html = build_sheet_header_html(title, artist, tom, bpm)
     footer_html = build_footer_html(next_title, next_artist, next_tone, next_bpm)
-page_html = f"""
-<div class="sheet">
-    {header_html}
-    {body_html}
-    {footer_html}
-</div>
-"""
 
+    body_html = f"""
+        <div class="sheet-body">
+          <pre class="sheet-body-text">{body}</pre>
+        </div>
+    """
+
+    # HTML completo da página
     return f"""
     <html>
     <head>
@@ -247,28 +269,49 @@ page_html = f"""
             line-height: 1.3;
         }}
 
+        /* Rodapé novo */
         .sheet-footer {{
-            border-top: 1px solid #ccc;
-            padding: 6px 8px 2px 8px;
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            align-items: center;
             font-size: 10px;
+            margin-top: auto;
+            padding-top: 6px;
+            border-top: 1px solid #ccc;
         }}
         .sheet-next-label {{
             font-weight: 700;
+            margin-bottom: 2px;
         }}
-        .sheet-footer-tombpm {{
-            text-align: right;
+        .sheet-next-header-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }}
+        .sheet-next-title {{
+            font-weight: 700;
+            text-transform: uppercase;
+        }}
+        .sheet-next-tombpm-header {{
+            display: flex;
+            gap: 12pt;
+        }}
+        .sheet-next-tom-header,
+        .sheet-next-bpm-header {{
+            font-weight: 700;
+        }}
+        .sheet-next-values-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }}
+        .sheet-next-tombpm-values {{
+            display: flex;
+            gap: 24pt;
         }}
       </style>
     </head>
     <body>
       <div class="sheet">
         {header_html}
-        <div class="sheet-body">
-          <pre class="sheet-body-text">{body}</pre>
-        </div>
+        {body_html}
         {footer_html}
       </div>
     </body>
@@ -358,7 +401,7 @@ def render_block_editor(block, block_idx, songs_df):
                 c3.write("")
 
             # botões mover / deletar / preview
-            col_up, col_down, col_del = c4, c5, st.columns(1)[0]  # truquezinho
+            col_up, col_down, col_del = c4, c5, st.columns(1)[0]
             if col_up.button("↑", key=f"item_up_{block_idx}_{i}"):
                 move_item(block_idx, i, -1)
                 st.rerun()

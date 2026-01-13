@@ -289,14 +289,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             font-size: 10px;
         }}
         .sheet-label {{
-            font-weight: 400;
+            font-weight: 700;
             text-align: center;
             font-size: 10px;
         }}
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 11px;
+            font-size: 10px;
         }}
 
         .sheet-body {{
@@ -305,7 +305,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
         .sheet-body-text {{
             white-space: pre-wrap;
-            font-size: 11px;
+            font-size: 10px;
             line-height: 1.3;
         }}
 

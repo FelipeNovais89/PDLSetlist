@@ -271,7 +271,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             align-items: center;
-            padding: 11px 11px 8px;
+            padding: 4px 4px 8px;
             border-bottom: 1px solid #ccc;
             font-size: 10px;
         }}

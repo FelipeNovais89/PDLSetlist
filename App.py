@@ -23,12 +23,10 @@ def load_songs_df():
 
     records = ws.get_all_records()
     if not records:
-        # garante as colunas mínimas mesmo se a planilha estiver vazia
         df = pd.DataFrame(columns=["Título", "Artista", "Tom", "BPM"])
     else:
         df = pd.DataFrame(records)
 
-    # garante que todas as colunas existem
     for col in ["Título", "Artista", "Tom", "BPM"]:
         if col not in df.columns:
             df[col] = ""
@@ -266,12 +264,10 @@ def build_sheet_page_html(item, next_item, block_name):
 
 def find_next_item(blocks, cur_block_idx, cur_item_idx):
     """Acha o próximo item na ordem do setlist para mostrar no rodapé."""
-    # mesmo bloco
     items = blocks[cur_block_idx]["items"]
     if cur_item_idx + 1 < len(items):
         return items[cur_item_idx + 1]
 
-    # próximos blocos
     for b in range(cur_block_idx + 1, len(blocks)):
         if blocks[b]["items"]:
             return blocks[b]["items"][0]
@@ -296,13 +292,13 @@ def render_block_editor(block, block_idx, songs_df):
 
     if up_col.button("↑", key=f"block_up_{block_idx}"):
         move_block(block_idx, -1)
-        st.experimental_rerun()
+        st.rerun()
     if down_col.button("↓", key=f"block_down_{block_idx}"):
         move_block(block_idx, 1)
-        st.experimental_rerun()
+        st.rerun()
     if del_col.button("✕", key=f"block_del_{block_idx}"):
         delete_block(block_idx)
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("---")
 
@@ -348,20 +344,20 @@ def render_block_editor(block, block_idx, songs_df):
                 c3.write("")
 
             # botões mover / deletar / preview
-            if c4.button("↑", key=f"item_up_{block_idx}_{i}"):
+            col_up, col_down, col_del = c4, c5, st.columns(1)[0]  # truquezinho
+            if col_up.button("↑", key=f"item_up_{block_idx}_{i}"):
                 move_item(block_idx, i, -1)
-                st.experimental_rerun()
-            if c4.button("↓", key=f"item_down_{block_idx}_{i}"):
+                st.rerun()
+            if col_down.button("↓", key=f"item_down_{block_idx}_{i}"):
                 move_item(block_idx, i, 1)
-                st.experimental_rerun()
-            if c5.button("✕", key=f"item_del_{block_idx}_{i}"):
+                st.rerun()
+            if col_del.button("✕", key=f"item_del_{block_idx}_{i}"):
                 delete_item(block_idx, i)
-                st.experimental_rerun()
+                st.rerun()
 
-            # botão para marcar como atual para preview
             if st.button("Preview", key=f"preview_{block_idx}_{i}"):
                 st.session_state.current_item = (block_idx, i)
-                st.experimental_rerun()
+                st.rerun()
 
     st.markdown("")
 
@@ -372,7 +368,7 @@ def render_block_editor(block, block_idx, songs_df):
 
     if add_col2.button("+ Pausa", key=f"add_pause_btn_{block_idx}"):
         block["items"].append({"type": "pause", "label": "Pausa"})
-        st.experimental_rerun()
+        st.rerun()
 
     # Seção de seleção de músicas do banco
     if st.session_state.get(f"show_add_music_{block_idx}", False):
@@ -396,7 +392,7 @@ def render_block_editor(block, block_idx, songs_df):
                 }
                 block["items"].append(item)
             st.session_state[f"show_add_music_{block_idx}"] = False
-            st.experimental_rerun()
+            st.rerun()
 
 
 def render_song_database():
@@ -417,9 +413,8 @@ def render_song_database():
             else:
                 append_song_to_sheet(title, artist, tom, bpm)
                 st.success("Música adicionada ao Google Sheets!")
-                # recarrega o cache
                 st.session_state.songs_df = load_songs_df()
-                st.experimental_rerun()
+                st.rerun()
 
 
 def main():
@@ -463,7 +458,6 @@ def main():
 
         blocks = st.session_state.blocks
 
-        # Define qual item está selecionado para preview
         cur = st.session_state.current_item
 
         current_item = None
@@ -477,7 +471,6 @@ def main():
                 current_block_name = blocks[b_idx]["name"]
                 next_item = find_next_item(blocks, b_idx, i_idx)
 
-        # se ainda não selecionou nada, pega a primeira música que existir
         if current_item is None:
             for b_idx, block in enumerate(blocks):
                 if block["items"]:

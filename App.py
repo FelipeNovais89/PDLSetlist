@@ -124,30 +124,37 @@ def build_sheet_header_html(title, artist, tom, bpm):
     """
 
 
-def build_sheet_footer_html(next_item):
-    if next_item is None:
-        prox = "FIM DO SETLIST"
-        prox_tom = "- / -"
-        prox_bpm = "BPM"
-    else:
-        if next_item["type"] == "pause":
-            prox = f"PAUSA: {next_item.get('label','')}"
-            prox_tom = "- / -"
-            prox_bpm = "BPM"
-        else:
-            prox = next_item.get("title", "PRÓXIMA MÚSICA")
-            prox_tom = next_item.get("tom") or "- / -"
-            bpm_val = next_item.get("bpm")
-            prox_bpm = bpm_val if bpm_val not in (None, "", 0) else "BPM"
+def build_footer_html(next_title, next_artist, next_tone, next_bpm):
+    if not next_title:
+        # Sem próxima música – fim do setlist
+        return """
+        <div class="sheet-footer">
+            <div class="sheet-next-label">FIM DO SETLIST</div>
+        </div>
+        """
+
+    # Próxima é uma música normal
+    tone_text = next_tone or "-"
+    bpm_text = str(next_bpm) if next_bpm is not None else "-"
 
     return f"""
     <div class="sheet-footer">
-        <div class="sheet-footer-next">
-            <span class="sheet-next-label">PRÓXIMA:</span> {prox}
+        <div class="sheet-next-label">PRÓXIMA:</div>
+
+        <div class="sheet-next-header-row">
+            <div class="sheet-next-title">{next_title}</div>
+            <div class="sheet-next-tombpm-header">
+                <span class="sheet-next-tom-header">TOM</span>
+                <span class="sheet-next-bpm-header">BPM</span>
+            </div>
         </div>
-        <div class="sheet-footer-tombpm">
-            <div class="sheet-label">TOM / BPM</div>
-            <div class="sheet-value">{prox_tom}  |  {prox_bpm}</div>
+
+        <div class="sheet-next-values-row">
+            <div class="sheet-next-artist">{next_artist or ""}</div>
+            <div class="sheet-next-tombpm-values">
+                <span class="sheet-next-tom-value">{tone_text}</span>
+                <span class="sheet-next-bpm-value">{bpm_text}</span>
+            </div>
         </div>
     </div>
     """
@@ -171,7 +178,14 @@ def build_sheet_page_html(item, next_item, block_name):
         )
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
-    footer_html = build_sheet_footer_html(next_item)
+    footer_html = build_footer_html(next_title, next_artist, next_tone, next_bpm)
+page_html = f"""
+<div class="sheet">
+    {header_html}
+    {body_html}
+    {footer_html}
+</div>
+"""
 
     return f"""
     <html>

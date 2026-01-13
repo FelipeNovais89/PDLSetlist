@@ -283,6 +283,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         .sheet-header-main .sheet-title {{
             font-weight: 700;
             text-transform: uppercase;
+            font-size: 10px;
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;

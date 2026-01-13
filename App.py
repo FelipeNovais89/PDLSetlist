@@ -286,17 +286,17 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;
-            font-size: 10px;
+            font-size: 8px;
         }}
         .sheet-label {{
             font-weight: 700;
             text-align: center;
-            font-size: 10px;
+            font-size: 8px;
         }}
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 10px;
+            font-size: 8px;
         }}
 
         .sheet-body {{

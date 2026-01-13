@@ -289,7 +289,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             font-size: 10px;
         }}
         .sheet-label {{
-            font-weight: 700;
+            font-weight: 400;
             text-align: center;
             font-size: 10px;
         }}

@@ -34,7 +34,7 @@ def load_songs_df():
     return df
 
 
-def append_song_to_sheet(title: str, artist: str, tom: str, bpm: str | int | None):
+def append_song_to_sheet(title: str, artist: str, tom: str, bpm):
     """Adiciona uma nova linha no Google Sheets."""
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
@@ -100,8 +100,39 @@ def delete_block(block_idx):
 
 
 # --------------------------------------------------------------------
-# 4. HTML / CSS PARA O PREVIEW
+# 4. LÓGICA DO RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
 # --------------------------------------------------------------------
+def get_footer_context(blocks, cur_block_idx, cur_item_idx):
+    """
+    Decide o que mostrar no rodapé da página atual.
+
+    Retorna (mode, next_item):
+
+    - mode == "next_music"  -> próxima música no MESMO bloco
+    - mode == "next_pause"  -> próxima é pausa no MESMO bloco
+    - mode == "end_block"   -> não tem próxima no bloco, mas existem blocos depois
+    - mode == "none"        -> acabou tudo (última música do último bloco)
+    """
+    items = blocks[cur_block_idx]["items"]
+
+    # Tem próximo item dentro do mesmo bloco?
+    if cur_item_idx + 1 < len(items):
+        nxt = items[cur_item_idx + 1]
+        if nxt["type"] == "pause":
+            return "next_pause", nxt
+        else:
+            return "next_music", nxt
+
+    # Não tem próximo dentro do bloco: ver se existem blocos depois com músicas
+    for b in range(cur_block_idx + 1, len(blocks)):
+        if blocks[b]["items"]:
+            # Existe outro bloco com músicas depois -> fim de bloco
+            return "end_block", None
+
+    # Não tem nada depois -> fim do setlist
+    return "none", None
+
+
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
     bpm_display = bpm if bpm not in (None, "", 0) else "BPM"
@@ -124,25 +155,13 @@ def build_sheet_header_html(title, artist, tom, bpm):
     """
 
 
-def build_footer_html(next_title, next_artist, next_tone, next_bpm):
-    """Rodapé no formato:
-       PRÓXIMA:
-       Deixa a Vida Me Levar              TOM   BPM
-       Zeca Pagodinho                     D     115
-    """
-    if not next_title:
-        # Sem próxima música – fim do setlist
-        return """
-        <div class="sheet-footer">
-            <div class="sheet-next-label">FIM DO SETLIST</div>
-        </div>
-        """
-
+def build_footer_next_music(next_title, next_artist, next_tone, next_bpm):
+    """Rodapé quando há próxima música no MESMO bloco."""
     tone_text = next_tone or "-"
-    bpm_text = str(next_bpm) if next_bpm is not None and next_bpm != "" else "-"
+    bpm_text = str(next_bpm) if next_bpm not in (None, "", 0) else "-"
 
     return f"""
-    <div class="sheet-footer">
+    <div class="sheet-footer sheet-footer-grid">
         <div class="sheet-next-label">PRÓXIMA:</div>
 
         <div class="sheet-next-header-row">
@@ -164,7 +183,31 @@ def build_footer_html(next_title, next_artist, next_tone, next_bpm):
     """
 
 
-def build_sheet_page_html(item, next_item, block_name):
+def build_footer_next_pause(label):
+    """Rodapé quando a próxima é uma PAUSA no mesmo bloco."""
+    txt = (label or "Pausa").upper()
+    return f"""
+    <div class="sheet-footer sheet-footer-center">
+        <div class="sheet-next-label">PRÓXIMA:</div>
+        <div class="sheet-next-pause-wrapper">
+            <div class="sheet-next-pause">{txt}</div>
+        </div>
+    </div>
+    """
+
+
+def build_footer_end_of_block():
+    """Rodapé quando acabou o bloco, mas há um próximo bloco depois."""
+    return """
+    <div class="sheet-footer sheet-footer-endblock">
+        <div class="sheet-endblock-wrapper">
+            <div class="sheet-endblock-text">FIM DE BLOCO</div>
+        </div>
+    </div>
+    """
+
+
+def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     # Dados da música/pausa atual
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
@@ -182,25 +225,22 @@ def build_sheet_page_html(item, next_item, block_name):
             "CIFRA / TEXTO AQUI (ainda não cadastrado).",
         )
 
-    # Próximo item (para o rodapé)
-    if next_item is None:
-        next_title = None
-        next_artist = None
-        next_tone = None
-        next_bpm = None
-    elif next_item["type"] == "pause":
-        next_title = "PAUSA"
-        next_artist = ""
-        next_tone = ""
-        next_bpm = ""
-    else:
-        next_title = next_item.get("title", "")
-        next_artist = next_item.get("artist", "")
-        next_tone = next_item.get("tom", "")
-        next_bpm = next_item.get("bpm", "")
-
     header_html = build_sheet_header_html(title, artist, tom, bpm)
-    footer_html = build_footer_html(next_title, next_artist, next_tone, next_bpm)
+
+    # Monta o rodapé de acordo com o modo
+    if footer_mode == "next_music" and footer_next_item is not None:
+        next_title = footer_next_item.get("title", "")
+        next_artist = footer_next_item.get("artist", "")
+        next_tone = footer_next_item.get("tom", "")
+        next_bpm = footer_next_item.get("bpm", "")
+        footer_html = build_footer_next_music(next_title, next_artist, next_tone, next_bpm)
+    elif footer_mode == "next_pause" and footer_next_item is not None:
+        label = footer_next_item.get("label", "Pausa")
+        footer_html = build_footer_next_pause(label)
+    elif footer_mode == "end_block":
+        footer_html = build_footer_end_of_block()
+    else:
+        footer_html = ""
 
     body_html = f"""
         <div class="sheet-body">
@@ -269,43 +309,100 @@ def build_sheet_page_html(item, next_item, block_name):
             line-height: 1.3;
         }}
 
-        /* Rodapé novo */
+        /* Rodapé base */
         .sheet-footer {{
             font-size: 10px;
             margin-top: auto;
             padding-top: 6px;
             border-top: 1px solid #ccc;
         }}
+
+        /* CENÁRIO 1: próxima música -> layout em linhas/colunas */
+        .sheet-footer-grid {{
+            display: flex;
+            flex-direction: column;
+        }}
+
         .sheet-next-label {{
             font-weight: 700;
             margin-bottom: 2px;
+            text-align: left;
         }}
+
         .sheet-next-header-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
+
         .sheet-next-title {{
             font-weight: 700;
             text-transform: uppercase;
         }}
+
+        /* Bloco TOM / BPM no rodapé (header) */
         .sheet-next-tombpm-header {{
-            display: flex;
-            gap: 12pt;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            column-gap: 4pt;
+            min-width: 70px;
+            margin-right: 16px;  /* puxa um pouco pra esquerda */
+            text-align: center;
         }}
+
         .sheet-next-tom-header,
         .sheet-next-bpm-header {{
             font-weight: 700;
         }}
+
+        /* Linha de baixo: artista + valores D / 115 */
         .sheet-next-values-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
+
         .sheet-next-tombpm-values {{
-            display: flex;
-            gap: 24pt;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            column-gap: 4pt;
+            min-width: 70px;
+            margin-right: 16px;
+            text-align: center;  /* valores alinhados com TOM/BPM */
         }}
+
+        /* CENÁRIO 2: próxima é PAUSA -> 'Pausa' centralizada na página */
+        .sheet-footer-center {{
+            padding-top: 6px;
+        }}
+
+        .sheet-next-pause-wrapper {{
+            display: flex;
+            justify-content: center;  /* centraliza no eixo horizontal da página */
+            margin-top: 4px;
+        }}
+
+        .sheet-next-pause {{
+            font-size: 12px;
+            font-weight: 700;
+        }}
+
+        /* CENÁRIO FIM DE BLOCO -> só 'FIM DE BLOCO' centralizado */
+        .sheet-footer-endblock {{
+            padding-top: 6px;
+        }}
+
+        .sheet-endblock-wrapper {{
+            display: flex;
+            justify-content: center;
+            margin-top: 4px;
+        }}
+
+        .sheet-endblock-text {{
+            font-size: 12px;
+            font-weight: 700;
+        }}
+
       </style>
     </head>
     <body>
@@ -317,19 +414,6 @@ def build_sheet_page_html(item, next_item, block_name):
     </body>
     </html>
     """
-
-
-def find_next_item(blocks, cur_block_idx, cur_item_idx):
-    """Acha o próximo item na ordem do setlist para mostrar no rodapé."""
-    items = blocks[cur_block_idx]["items"]
-    if cur_item_idx + 1 < len(items):
-        return items[cur_item_idx + 1]
-
-    for b in range(cur_block_idx + 1, len(blocks)):
-        if blocks[b]["items"]:
-            return blocks[b]["items"][0]
-
-    return None
 
 
 # --------------------------------------------------------------------
@@ -514,32 +598,46 @@ def main():
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
-
         cur = st.session_state.current_item
 
         current_item = None
         current_block_name = ""
-        next_item = None
+        footer_mode = "none"
+        footer_next_item = None
+        cur_block_idx = None
+        cur_item_idx = None
 
+        # Se já existe um item selecionado para preview
         if cur is not None:
             b_idx, i_idx = cur
             if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
                 current_item = blocks[b_idx]["items"][i_idx]
                 current_block_name = blocks[b_idx]["name"]
-                next_item = find_next_item(blocks, b_idx, i_idx)
+                cur_block_idx, cur_item_idx = b_idx, i_idx
 
+        # Se ainda não selecionou nada: pegar a primeira música que existir
         if current_item is None:
             for b_idx, block in enumerate(blocks):
                 if block["items"]:
                     current_item = block["items"][0]
                     current_block_name = block["name"]
-                    next_item = find_next_item(blocks, b_idx, 0)
+                    cur_block_idx, cur_item_idx = b_idx, 0
                     break
 
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            html = build_sheet_page_html(current_item, next_item, current_block_name)
+            # Descobre o que vai no rodapé desta página (próxima música, pausa ou fim de bloco)
+            footer_mode, footer_next_item = get_footer_context(
+                blocks, cur_block_idx, cur_item_idx
+            )
+
+            html = build_sheet_page_html(
+                current_item,
+                footer_mode,
+                footer_next_item,
+                current_block_name,
+            )
             st.components.v1.html(html, height=650, scrolling=True)
 
 

@@ -269,7 +269,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
         .sheet-header {{
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: 2fr 1fr 1fr;
             align-items: center;
             padding: 4px 4px 8px;
             border-bottom: 1px solid #ccc;

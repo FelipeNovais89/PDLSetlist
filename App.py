@@ -312,9 +312,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
         /* Rodapé base */
         .sheet-footer {{
-            font-size: 10px;
+            font-size: 8px;
             margin-top: auto;
-            padding-top: 6px;
+            padding-top: 4px;
             border-top: 1px solid #ccc;
         }}
 
@@ -384,7 +384,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
 
         .sheet-next-pause {{
-            font-size: 12px;
+            font-size: 8px;
             font-weight: 700;
         }}
 
@@ -400,7 +400,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
 
         .sheet-endblock-text {{
-            font-size: 12px;
+            font-size: 8px;
             font-weight: 700;
         }}
 

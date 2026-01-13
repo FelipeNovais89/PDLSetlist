@@ -271,9 +271,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             align-items: center;
-            padding: 4px 8px 8px 8px;
+            padding: 10px 8px 10px;
             border-bottom: 1px solid #ccc;
-            font-size: 11px;
+            font-size: 10px;
         }}
         .sheet-header-col {{
             display: flex;
@@ -294,7 +294,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             font-size: 8px;
         }}
         .sheet-value {{
-            text-align: right;
+            text-align: center;
             font-weight: 400;
             font-size: 8px;
         }}

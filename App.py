@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
+import io
 
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 
 # --------------------------------------------------------------------
@@ -14,7 +17,7 @@ def load_songs_df():
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
 
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     creds = Credentials.from_service_account_info(secrets, scopes=scopes)
     gc = gspread.authorize(creds)
 
@@ -23,11 +26,21 @@ def load_songs_df():
 
     records = ws.get_all_records()
     if not records:
-        df = pd.DataFrame(columns=["Título", "Artista", "Tom", "BPM"])
+        df = pd.DataFrame(
+            columns=["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID"]
+        )
     else:
         df = pd.DataFrame(records)
 
-    for col in ["Título", "Artista", "Tom", "BPM"]:
+    # Garantir colunas importantes
+    if "Tom_Original" not in df.columns and "Tom" in df.columns:
+        df["Tom_Original"] = df["Tom"]
+
+    if "Tom" not in df.columns and "Tom_Original" in df.columns:
+        # cria uma cópia só pra compatibilidade interna
+        df["Tom"] = df["Tom_Original"]
+
+    for col in ["Título", "Artista", "Tom_Original", "Tom", "BPM", "CifraDriveID"]:
         if col not in df.columns:
             df[col] = ""
 
@@ -35,7 +48,12 @@ def load_songs_df():
 
 
 def append_song_to_sheet(title: str, artist: str, tom: str, bpm):
-    """Adiciona uma nova linha no Google Sheets."""
+    """
+    Adiciona uma nova linha no Google Sheets.
+
+    Observação: assume que a ordem das colunas no Sheet é:
+    Título | Artista | Tom_Original | BPM | (CifraDriveID)
+    """
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
 
@@ -45,7 +63,38 @@ def append_song_to_sheet(title: str, artist: str, tom: str, bpm):
 
     sh = gc.open_by_key(sheet_id)
     ws = sh.sheet1
+    # título, artista, tom_original, bpm
     ws.append_row([title, artist, tom, bpm or ""])
+
+
+# --------------------------------------------------------------------
+# 1b. CONEXÃO COM GOOGLE DRIVE PARA LER CIFRA .TXT
+# --------------------------------------------------------------------
+@st.cache_data(ttl=300)
+def load_cifra_from_drive(file_id: str) -> str:
+    """
+    Lê o conteúdo de um arquivo de texto (.txt) no Google Drive,
+    dado o file_id salvo na coluna 'CifraDriveID'.
+    """
+    if not file_id:
+        return ""
+
+    secrets = st.secrets["gcp_service_account"]
+    scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
+
+    service = build("drive", "v3", credentials=creds)
+    request = service.files().get_media(fileId=file_id)
+
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+
+    content = fh.getvalue().decode("utf-8", errors="ignore")
+    return content
 
 
 # --------------------------------------------------------------------
@@ -222,7 +271,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         bpm = item.get("bpm", "")
         body = item.get(
             "text",
-            "CIFRA / TEXTO AQUI (ainda não cadastrado).",
+            "CIFRA / TEXTO AQUI (ainda não cadastrada no Drive).",
         )
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
@@ -233,7 +282,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         next_artist = footer_next_item.get("artist", "")
         next_tone = footer_next_item.get("tom", "")
         next_bpm = footer_next_item.get("bpm", "")
-        footer_html = build_footer_next_music(next_title, next_artist, next_tone, next_bpm)
+        footer_html = build_footer_next_music(
+            next_title, next_artist, next_tone, next_bpm
+        )
     elif footer_mode == "next_pause" and footer_next_item is not None:
         label = footer_next_item.get("label", "Pausa")
         footer_html = build_footer_next_pause(label)
@@ -347,8 +398,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             grid-template-columns: 1fr 0.25fr;
             column-gap: 4pt;
             min-width: 70px;
-            margin-right: 16px;  /* puxa um pouco pra esquerda */
-            text-align: center;
+            margin-right: 16px;
+            textalign: center;
         }}
 
         .sheet-next-tom-header,
@@ -369,7 +420,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             column-gap: 4pt;
             min-width: 70px;
             margin-right: 16px;
-            text-align: center;  /* valores alinhados com TOM/BPM */
+            text-align: center;
         }}
 
         /* CENÁRIO 2: próxima é PAUSA -> 'Pausa' centralizada na página */
@@ -379,7 +430,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
         .sheet-next-pause-wrapper {{
             display: flex;
-            justify-content: center;  /* centraliza no eixo horizontal da página */
+            justify-content: center;
             margin-top: 4px;
         }}
 
@@ -528,8 +579,9 @@ def render_block_editor(block, block_idx, songs_df):
                     "type": "music",
                     "title": row.get("Título", ""),
                     "artist": row.get("Artista", ""),
-                    "tom": row.get("Tom", ""),
+                    "tom": row.get("Tom", "") or row.get("Tom_Original", ""),
                     "bpm": row.get("BPM", ""),
+                    # text será preenchido no preview a partir do Drive
                     "text": "",
                 }
                 block["items"].append(item)
@@ -546,7 +598,7 @@ def render_song_database():
     with st.expander("Adicionar nova música ao banco"):
         title = st.text_input("Título")
         artist = st.text_input("Artista")
-        tom = st.text_input("Tom (ex.: Fm, C, Gm...)")
+        tom = st.text_input("Tom original (ex.: Fm, C, Gm...)")
         bpm = st.text_input("BPM")
 
         if st.button("Salvar no banco"):
@@ -559,6 +611,9 @@ def render_song_database():
                 st.rerun()
 
 
+# --------------------------------------------------------------------
+# 6. APLICAÇÃO PRINCIPAL
+# --------------------------------------------------------------------
 def main():
     st.set_page_config(
         page_title="PDL Setlist",
@@ -628,6 +683,22 @@ def main():
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
+            # SE FOR MÚSICA: buscar cifra no Drive pelo CifraDriveID
+            if current_item["type"] == "music":
+                df = st.session_state.songs_df
+                title = current_item.get("title", "")
+                # procura a linha da música
+                row_match = df[df["Título"] == title]
+                if not row_match.empty:
+                    row = row_match.iloc[0]
+                    file_id = row.get("CifraDriveID", "")
+                    if file_id:
+                        try:
+                            cifra_text = load_cifra_from_drive(file_id)
+                            current_item["text"] = cifra_text
+                        except Exception as e:
+                            current_item["text"] = f"Erro ao carregar cifra do Drive: {e}"
+
             # Descobre o que vai no rodapé desta página (próxima música, pausa ou fim de bloco)
             footer_mode, footer_next_item = get_footer_context(
                 blocks, cur_block_idx, cur_item_idx

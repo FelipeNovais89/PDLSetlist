@@ -377,11 +377,11 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             padding: 12px 8px 12px 8px;
             min-height: 420px;
         }}
-        .sheet-body-text {
+        .sheet-body-text {{
             white-space: pre;
-    font-family: "Courier New", monospace;
-    font-size: 10px;
-    line-height: 1.3;
+            font-family: "Courier New", monospace;
+            font-size: 10px;
+            line-height: 1.3;
 }}
 
         .sheet-footer {{

@@ -14,7 +14,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 
-
 # --------------------------------------------------------------------
 # 1. GOOGLE SHEETS – BANCO DE MÚSICAS
 # --------------------------------------------------------------------
@@ -145,7 +144,6 @@ def init_state():
     if "setlist_name" not in st.session_state:
         st.session_state.setlist_name = "Pagode do LEC"
 
-    # tamanho da fonte da edição de cifra
     if "cifra_font_size" not in st.session_state:
         st.session_state.cifra_font_size = 14
 
@@ -179,19 +177,9 @@ def delete_block(block_idx):
 
 
 # --------------------------------------------------------------------
-# 5. LÓGICA DO RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
+# 5. LÓGICA DO RODAPÉ
 # --------------------------------------------------------------------
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
-    """
-    Decide o que mostrar no rodapé da página atual.
-
-    Retorna (mode, next_item):
-
-    - "next_music"  -> próxima música no MESMO bloco
-    - "next_pause"  -> próxima é pausa no MESMO bloco
-    - "end_block"   -> não tem próxima no bloco, mas existem blocos depois
-    - "none"        -> acabou tudo (última música do último bloco)
-    """
     items = blocks[cur_block_idx]["items"]
 
     if cur_item_idx + 1 < len(items):
@@ -283,7 +271,6 @@ def build_footer_end_of_block():
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    # Dados da música/pausa atual
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
         artist = block_name
@@ -295,8 +282,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         artist = item.get("artist", "")
         tom = item.get("tom", "")
         bpm = item.get("bpm", "")
-
         cifra_id = item.get("cifra_id", "")
+
         if cifra_id:
             body = load_chord_from_drive(cifra_id)
         else:
@@ -329,7 +316,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         </div>
     """
 
-    # HTML completo
     return f"""
     <html>
     <head>
@@ -492,15 +478,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 # --------------------------------------------------------------------
-# 6b. PDF DO SETLIST INTEIRO (uma página por item)
+# 6b. PDF DO SETLIST INTEIRO
 # --------------------------------------------------------------------
 def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
-    """
-    Gera um PDF com o setlist inteiro:
-    - percorre todos os blocos e itens
-    - 1 página por música/pausa
-    - rodapé com próxima / pausa / fim de bloco
-    """
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -514,7 +494,6 @@ def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
         block_name = block["name"]
         items = block["items"]
         for i_idx, item in enumerate(items):
-            # contexto de rodapé desta página
             footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
 
             if item["type"] == "pause":
@@ -538,7 +517,6 @@ def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
             c.setFont("Courier", 10)
             y = height - top_margin
 
-            # Cabeçalho: nome do setlist e bloco
             c.drawString(
                 margin_x,
                 y,
@@ -546,7 +524,6 @@ def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
             )
             y -= line_h * 1.5
 
-            # Título / artista
             c.setFont("Courier-Bold", 11)
             c.drawString(margin_x, y, (title or "").upper())
             y -= line_h
@@ -563,16 +540,13 @@ def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
             c.line(margin_x, y, width - margin_x, y)
             y -= line_h
 
-            # Corpo (cifra)
             c.setFont("Courier", 9.5)
             for line in (body or "").splitlines():
                 if y < bottom_margin + 15 * mm:
-                    # se der overflow, para (por enquanto não quebra a música)
                     break
                 c.drawString(margin_x, y, line)
                 y -= line_h
 
-            # Rodapé
             footer_text = ""
             if footer_mode == "next_music" and footer_next_item is not None:
                 n_title = footer_next_item.get("title", "")
@@ -625,7 +599,6 @@ def render_block_editor(block, block_idx, songs_df):
 
     st.markdown("---")
 
-    # Itens do bloco
     for i, item in enumerate(block["items"]):
         row = st.container()
         with row:
@@ -660,7 +633,6 @@ def render_block_editor(block, block_idx, songs_df):
                 )
                 item["tom"] = new_tom
 
-                # Cifra (ver / editar)
                 cifra_id = item.get("cifra_id", "")
                 with c1.expander("Ver cifra"):
                     if cifra_id:
@@ -671,18 +643,16 @@ def render_block_editor(block, block_idx, songs_df):
                     font_size = st.session_state.cifra_font_size
 
                     col_font_minus, col_font_plus = st.columns(2)
-                    if col_font_minus.button("A﹣", key=f"font_minus_{block_idx}_{i}"):
+                    if col_font_minus.button(
+                        "A﹣", key=f"font_minus_{block_idx}_{i}"
+                    ):
                         st.session_state.cifra_font_size = max(8, font_size - 1)
                         st.rerun()
-                    if col_font_plus.button("A﹢", key=f"font_plus_{block_idx}_{i}"):
+                    if col_font_plus.button(
+                        "A﹢", key=f"font_plus_{block_idx}_{i}"
+                    ):
                         st.session_state.cifra_font_size = min(24, font_size + 1)
                         st.rerun()
-
-                    st.markdown(
-                        f"<style>.cifra-area {{ font-family: 'Courier New', monospace; "
-                        f"font-size: {font_size}px; }}</style>",
-                        unsafe_allow_html=True,
-                    )
 
                     edit_key = f"cifra_edit_{block_idx}_{i}"
                     edited = st.text_area(
@@ -691,7 +661,19 @@ def render_block_editor(block, block_idx, songs_df):
                         height=300,
                         key=edit_key,
                         label_visibility="collapsed",
-                        attrs={"class": "cifra-area"},
+                    )
+
+                    # CSS global para os textareas
+                    st.markdown(
+                        f"""
+                        <style>
+                        textarea[data-testid="stTextArea"] {{
+                            font-family: 'Courier New', monospace;
+                            font-size: {font_size}px;
+                        }}
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
                     )
 
                     if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
@@ -711,7 +693,6 @@ def render_block_editor(block, block_idx, songs_df):
                 c2.write("")
                 c3.write("")
 
-            # botões mover / deletar / preview
             col_up, col_down, col_del = c4, c5, st.columns(1)[0]
             if col_up.button("↑", key=f"item_up_{block_idx}_{i}"):
                 move_item(block_idx, i, -1)
@@ -729,7 +710,6 @@ def render_block_editor(block, block_idx, songs_df):
 
     st.markdown("")
 
-    # Adicionar músicas / pausa
     add_col1, add_col2 = st.columns(2)
     if add_col1.button("+ Música", key=f"add_music_btn_{block_idx}"):
         st.session_state[f"show_add_music_{block_idx}"] = True
@@ -738,7 +718,6 @@ def render_block_editor(block, block_idx, songs_df):
         block["items"].append({"type": "pause", "label": "Pausa"})
         st.rerun()
 
-    # Seleção de músicas do banco
     if st.session_state.get(f"show_add_music_{block_idx}", False):
         st.markdown("#### Selecionar músicas do banco")
         all_titles = list(songs_df["Título"])
@@ -750,9 +729,7 @@ def render_block_editor(block, block_idx, songs_df):
         if st.button("Adicionar ao bloco", key=f"confirm_add_music_{block_idx}"):
             for title in selected:
                 row = songs_df[songs_df["Título"] == title].iloc[0]
-
                 cifra_id = str(row.get("CifraDriveID", "")).strip()
-
                 item = {
                     "type": "music",
                     "title": row.get("Título", ""),
@@ -816,7 +793,6 @@ def main():
 
     left_col, right_col = st.columns([1.1, 1])
 
-    # Coluna esquerda – editor
     with left_col:
         st.subheader("Editor de Setlist")
 
@@ -833,7 +809,6 @@ def main():
 
         render_song_database()
 
-    # Coluna direita – preview
     with right_col:
         st.subheader("Preview")
 
@@ -877,7 +852,6 @@ def main():
             )
             st.components.v1.html(html, height=650, scrolling=True)
 
-            # ---------- NAVEGAÇÃO ENTRE PÁGINAS ----------
             flat_items = []
             for b_idx, block in enumerate(blocks):
                 for i_idx, _it in enumerate(block["items"]):
@@ -891,7 +865,6 @@ def main():
 
             nav_prev, nav_info, nav_next, nav_pdf = st.columns([1, 2, 1, 3])
 
-            # botão anterior
             if nav_prev.button("⬅️", disabled=(current_pos <= 0)):
                 new_pos = max(0, current_pos - 1)
                 st.session_state.current_item = flat_items[new_pos]
@@ -902,13 +875,11 @@ def main():
                 unsafe_allow_html=True,
             )
 
-            # botão próximo
             if nav_next.button("➡️", disabled=(current_pos >= total_pages - 1)):
                 new_pos = min(total_pages - 1, current_pos + 1)
                 st.session_state.current_item = flat_items[new_pos]
                 st.rerun()
 
-            # ---------- BOTÃO PDF DO SETLIST INTEIRO ----------
             pdf_bytes = create_pdf_for_setlist(blocks, st.session_state.setlist_name)
             nav_pdf.download_button(
                 "💾 PDF do setlist inteiro",

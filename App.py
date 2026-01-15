@@ -685,19 +685,26 @@ def main():
         else:
             # SE FOR MÚSICA: buscar cifra no Drive pelo CifraDriveID
             if current_item["type"] == "music":
-                df = st.session_state.songs_df
-                title = current_item.get("title", "")
-                # procura a linha da música
-                row_match = df[df["Título"] == title]
-                if not row_match.empty:
-                    row = row_match.iloc[0]
-                    file_id = row.get("CifraDriveID", "")
-                    if file_id:
-                        try:
-                            cifra_text = load_cifra_from_drive(file_id)
-                            current_item["text"] = cifra_text
-                        except Exception as e:
-                            current_item["text"] = f"Erro ao carregar cifra do Drive: {e}"
+    df = st.session_state.songs_df
+    title = current_item.get("title", "")
+    # procura a linha da música
+    row_match = df[df["Título"] == title]
+    if not row_match.empty:
+        row = row_match.iloc[0]
+        file_id = row.get("CifraDriveID", "")
+        if file_id:
+            try:
+                cifra_text = load_cifra_from_drive(file_id)
+                current_item["text"] = cifra_text or "(Cifra vazia no arquivo do Drive.)"
+            except Exception as e:
+                # Mostra o erro tanto no corpo da página quanto como alerta no app
+                msg = f"Erro ao carregar cifra do Drive (ID: {file_id}): {e}"
+                current_item["text"] = msg
+                st.error(msg)
+        else:
+            current_item["text"] = "Nenhum CifraDriveID definido para esta música na planilha."
+    else:
+        current_item["text"] = f"Música '{title}' não encontrada na planilha."
 
             # Descobre o que vai no rodapé desta página (próxima música, pausa ou fim de bloco)
             footer_mode, footer_next_item = get_footer_context(

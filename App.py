@@ -379,6 +379,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
         .sheet-body-text {{
             white-space: pre;
+            font-weight: 500;
             font-family: "Courier New", monospace;
             font-size: 10px;
             line-height: 1.3;

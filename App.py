@@ -346,7 +346,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             align-items: center;
             padding: 4px 4px 8px;
             border-bottom: 1px solid #ccc;
-            font-size: 10px;
+            font-size: 12px;
         }}
         .sheet-header-col {{
             display: flex;
@@ -356,21 +356,21 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         .sheet-header-main .sheet-title {{
             font-weight: 700;
             text-transform: uppercase;
-            font-size: 8px;
+            font-size: 10px;
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;
-            font-size: 6px;
+            font-size: 10px;
         }}
         .sheet-label {{
             font-weight: 700;
             text-align: center;
-            font-size: 8px;
+            font-size: 10px;
         }}
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 6px;
+            font-size: 10px;
         }}
 
         .sheet-body {{

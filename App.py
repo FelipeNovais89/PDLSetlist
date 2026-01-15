@@ -1,12 +1,12 @@
-import io
-
 import streamlit as st
 import pandas as pd
 
 import gspread
 from google.oauth2.service_account import Credentials
+
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from io import BytesIO
 
 
 # --------------------------------------------------------------------
@@ -33,7 +33,7 @@ def load_songs_df():
     else:
         df = pd.DataFrame(records)
 
-    # Garante que todas as colunas existam
+    # Garante que todas as colunas existem
     for col in ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID"]:
         if col not in df.columns:
             df[col] = ""
@@ -41,7 +41,9 @@ def load_songs_df():
     return df
 
 
-def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_id: str):
+def append_song_to_sheet(
+    title: str, artist: str, tom_original: str, bpm: str, cifra_drive_id: str = ""
+):
     """Adiciona uma nova linha no Google Sheets."""
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
@@ -52,37 +54,69 @@ def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_
 
     sh = gc.open_by_key(sheet_id)
     ws = sh.sheet1
-    ws.append_row([title, artist, tom_original, bpm or "", cifra_id or ""])
+    ws.append_row([title, artist, tom_original, bpm or "", cifra_drive_id])
 
 
 # --------------------------------------------------------------------
-# 2. LER CIFRA DO GOOGLE DRIVE
+# 2. FUNÇÕES PARA LER / GRAVAR CIFRA NO GOOGLE DRIVE
 # --------------------------------------------------------------------
-@st.cache_data(ttl=300)
+def get_drive_service():
+    """Cria um client do Google Drive usando o service account."""
+    secrets = st.secrets["gcp_service_account"]
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
+    return build("drive", "v3", credentials=creds)
+
+
 def load_cifra_from_drive(file_id: str) -> str:
-    """Baixa o conteúdo .txt da cifra no Drive usando o ID."""
+    """Baixa o conteúdo .txt do Drive e devolve como string."""
     if not file_id:
-        return "CIFRA / TEXTO AQUI (ID do Drive não informado)."
+        return ""
+
+    service = get_drive_service()
+    request = service.files().get_media(fileId=file_id)
+    fh = BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+
+    return fh.getvalue().decode("utf-8", errors="ignore")
+
+
+def update_cifra_on_drive(file_id: str, content: str) -> None:
+    """Sobrescreve o arquivo .txt do Drive com o novo conteúdo."""
+    if not file_id:
+        return
+
+    service = get_drive_service()
+    fh = BytesIO(content.encode("utf-8"))
+    media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
+
+    service.files().update(
+        fileId=file_id,
+        media_body=media,
+    ).execute()
+
+
+def ensure_item_body_loaded(item: dict) -> None:
+    """Se for música e ainda não tiver texto, tenta carregar do Drive."""
+    if item.get("type") != "music":
+        return
+    if item.get("text"):
+        return
+
+    drive_id = item.get("cifra_drive_id", "")
+    if not drive_id:
+        return
 
     try:
-        secrets = st.secrets["gcp_service_account"]
-        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
-        creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-
-        service = build("drive", "v3", credentials=creds)
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-
-        fh.seek(0)
-        content = fh.read().decode("utf-8", errors="ignore")
-        return content or "CIFRA / TEXTO VAZIO."
+        body = load_cifra_from_drive(drive_id)
     except Exception as e:
-        return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
+        body = f"Erro ao carregar cifra do Drive (ID: {drive_id}):\n{e}"
+
+    item["text"] = body or ""
 
 
 # --------------------------------------------------------------------
@@ -170,6 +204,9 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     return "none", None
 
 
+# --------------------------------------------------------------------
+# 6. HTML / CSS PARA O PREVIEW
+# --------------------------------------------------------------------
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
     bpm_display = bpm if bpm not in (None, "", 0) else "BPM"
@@ -244,6 +281,29 @@ def build_footer_end_of_block():
     """
 
 
+def estimate_body_font_size(body: str, min_size: float = 6.0, max_size: float = 12.0,
+                            target_chars: int = 60) -> float:
+    """
+    Estima um tamanho de fonte para tentar caber na largura,
+    baseado no comprimento da maior linha de texto.
+    """
+    lines = body.splitlines() or [""]
+    max_len = max(len(l) for l in lines)
+    if max_len <= 0:
+        return max_size
+
+    if max_len <= target_chars:
+        return max_size
+
+    scale = target_chars / max_len
+    size = max_size * scale
+    if size < min_size:
+        size = min_size
+    if size > max_size:
+        size = max_size
+    return size
+
+
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     # Dados da música/pausa atual
     if item["type"] == "pause":
@@ -258,30 +318,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         tom = item.get("tom", "")
         bpm = item.get("bpm", "")
 
-        drive_id = item.get("drive_id", "")
-        if drive_id:
-            body = load_cifra_from_drive(drive_id)
-        else:
-            body = item.get(
-                "text",
-                "CIFRA / TEXTO AQUI (ainda não cadastrada ou sem ID do Drive).",
-            )
+        # garante que já carregou do Drive se estiver vazio
+        ensure_item_body_loaded(item)
+        body = item.get("text", "") or "CIFRA / TEXTO AQUI (ainda não cadastrada)."
+
+    # tamanho de fonte aproximado para caber
+    body_font_px = estimate_body_font_size(body)
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
-
-    # --- Ajuste automático do tamanho da fonte (fit text) ---
-    lines = body.splitlines() if body else [""]
-    max_len = max((len(l) for l in lines), default=1)
-
-    BASE_COLS = 60   # nº de caracteres "ideais" na largura
-    MAX_FONT = 11    # fonte máxima (px)
-    MIN_FONT = 2     # fonte mínima (px)
-
-    if max_len <= BASE_COLS:
-        body_font_px = MAX_FONT
-    else:
-        scaled = MAX_FONT * BASE_COLS / max_len
-        body_font_px = max(MIN_FONT, int(scaled))
 
     # Monta o rodapé de acordo com o modo
     if footer_mode == "next_music" and footer_next_item is not None:
@@ -302,7 +346,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
     body_html = f"""
         <div class="sheet-body">
-          <pre class="sheet-body-text" style="font-size:{body_font_px}px">{body}</pre>
+          <pre class="sheet-body-text">{body}</pre>
         </div>
     """
 
@@ -363,9 +407,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             min-height: 420px;
         }}
         .sheet-body-text {{
-            white-space: pre;      /* não quebra linha, mantém os espaços */
+            white-space: pre;
+            font-size: {body_font_px:.1f}px;
             line-height: 1.3;
-            word-break: keep-all;
         }}
 
         /* Rodapé base */
@@ -476,7 +520,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 # --------------------------------------------------------------------
-# 6. INTERFACE
+# 7. INTERFACE: EDITOR DE BLOCOS
 # --------------------------------------------------------------------
 def render_block_editor(block, block_idx, songs_df):
     st.markdown(f"### Bloco {block_idx + 1}")
@@ -537,6 +581,64 @@ def render_block_editor(block, block_idx, songs_df):
                 )
                 item["tom"] = new_tom
 
+                # --- EDIÇÃO / SALVAMENTO DA CIFRA ---
+                ensure_item_body_loaded(item)
+
+                edit_key = f"editing_cifra_{block_idx}_{i}"
+                if edit_key not in st.session_state:
+                    st.session_state[edit_key] = False
+
+                if not st.session_state[edit_key]:
+                    # modo visualização
+                    with st.expander("Ver cifra", expanded=False):
+                        st.text_area(
+                            "Cifra (somente leitura)",
+                            value=item.get("text", ""),
+                            key=f"cifra_view_{block_idx}_{i}",
+                            height=220,
+                            disabled=True,
+                        )
+                        if st.button(
+                            "Editar cifra", key=f"btn_edit_cifra_{block_idx}_{i}"
+                        ):
+                            st.session_state[edit_key] = True
+                            st.rerun()
+                else:
+                    # modo edição
+                    with st.expander("Editar cifra", expanded=True):
+                        new_body = st.text_area(
+                            "Edite a cifra e clique em 'Salvar alterações'",
+                            value=item.get("text", ""),
+                            key=f"cifra_edit_{block_idx}_{i}",
+                            height=260,
+                        )
+
+                        col_save, col_cancel = st.columns(2)
+                        if col_save.button(
+                            "Salvar alterações",
+                            key=f"btn_save_cifra_{block_idx}_{i}",
+                        ):
+                            item["text"] = new_body
+                            drive_id = item.get("cifra_drive_id", "")
+                            if drive_id:
+                                try:
+                                    update_cifra_on_drive(drive_id, new_body)
+                                    st.success("Cifra salva no Google Drive!")
+                                except Exception as e:
+                                    st.error(f"Erro ao salvar no Drive: {e}")
+                            else:
+                                st.warning(
+                                    "Esta música não tem CifraDriveID na planilha."
+                                )
+                            st.session_state[edit_key] = False
+                            st.rerun()
+
+                        if col_cancel.button(
+                            "Cancelar edição", key=f"btn_cancel_cifra_{block_idx}_{i}"
+                        ):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+
             else:
                 label = f"⏸ PAUSA – {item.get('label','')}"
                 c1.markdown(label)
@@ -589,7 +691,7 @@ def render_block_editor(block, block_idx, songs_df):
                     "tom": row.get("Tom_Original", ""),
                     "bpm": row.get("BPM", ""),
                     "text": "",
-                    "drive_id": row.get("CifraDriveID", ""),
+                    "cifra_drive_id": row.get("CifraDriveID", ""),
                 }
                 block["items"].append(item)
             st.session_state[f"show_add_music_{block_idx}"] = False
@@ -607,7 +709,7 @@ def render_song_database():
         artist = st.text_input("Artista")
         tom_original = st.text_input("Tom original (ex.: Fm, C, Gm...)")
         bpm = st.text_input("BPM")
-        cifra_id = st.text_input("ID da cifra no Drive (opcional)")
+        cifra_id = st.text_input("CifraDriveID (opcional)")
 
         if st.button("Salvar no banco"):
             if title.strip() == "":
@@ -619,6 +721,9 @@ def render_song_database():
                 st.rerun()
 
 
+# --------------------------------------------------------------------
+# 8. MAIN
+# --------------------------------------------------------------------
 def main():
     st.set_page_config(
         page_title="PDL Setlist",
@@ -688,7 +793,7 @@ def main():
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            # Descobre o que vai no rodapé desta página (próxima música, pausa ou fim de bloco)
+            # Descobre o que vai no rodapé desta página
             footer_mode, footer_next_item = get_footer_context(
                 blocks, cur_block_idx, cur_item_idx
             )

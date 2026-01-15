@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-import html  # para escapar o texto da cifra na prévia em HTML
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -379,7 +378,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             min-height: 420px;
         }}
         .sheet-body-text {{
-            white-space: pre;      /* mantém exatamente os espaços da cifra */
+            white-space: pre-wrap;
             font-size: 10px;
             line-height: 1.3;
         }}
@@ -562,50 +561,16 @@ def render_block_editor(block, block_idx, songs_df):
                         key=edit_key,
                     )
 
-                    # ----------------- CONTROLE DO TAMANHO DA LETRA -----------------
-                    font_key = f"cifra_font_size_{block_idx}_{i}"
-                    if font_key not in st.session_state:
-                        st.session_state[font_key] = 14  # tamanho inicial em px
-
-                    col_minus, col_save, col_plus = st.columns([1, 2, 1])
-
-                    with col_minus:
-                        if st.button("A-", key=f"font_minus_{block_idx}_{i}"):
-                            if st.session_state[font_key] > 8:
-                                st.session_state[font_key] -= 1
-
-                    with col_save:
-                        if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
-                            if cifra_id:
-                                save_chord_to_drive(cifra_id, edited)
-                                st.success("Cifra atualizada no Drive.")
-                            else:
-                                item["text"] = edited
-                                st.success(
-                                    "Cifra salva apenas neste setlist (sem arquivo no Drive)."
-                                )
-                            st.rerun()
-
-                    with col_plus:
-                        if st.button("A+", key=f"font_plus_{block_idx}_{i}"):
-                            if st.session_state[font_key] < 26:
-                                st.session_state[font_key] += 1
-
-                    # Prévia da cifra com o tamanho de fonte ajustável
-                    font_size = st.session_state[font_key]
-                    preview_html = f"""
-                    <style>
-                    #preview_cifra_{block_idx}_{i} {{
-                        font-family: "Courier New", monospace;
-                        font-size: {font_size}px;
-                        line-height: 1.35;
-                        white-space: pre;
-                    }}
-                    </style>
-                    <pre id="preview_cifra_{block_idx}_{i}">{html.escape(edited)}</pre>
-                    """
-                    st.markdown(preview_html, unsafe_allow_html=True)
-                    # ----------------------------------------------------------------
+                    if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
+                        if cifra_id:
+                            save_chord_to_drive(cifra_id, edited)
+                            st.success("Cifra atualizada no Drive.")
+                        else:
+                            item["text"] = edited
+                            st.success(
+                                "Cifra salva apenas neste setlist (sem arquivo no Drive)."
+                            )
+                        st.rerun()
 
             else:
                 label = f"⏸ PAUSA – {item.get('label','')}"
@@ -713,7 +678,7 @@ def main():
         <style>
         .stTextArea textarea {
             font-family: "Courier New", monospace !important;
-            font-size: 14px !important;
+            font-size: 10px !important;
         }
         </style>
         """,
@@ -784,13 +749,13 @@ def main():
                 blocks, cur_block_idx, cur_item_idx
             )
 
-            html_page = build_sheet_page_html(
+            html = build_sheet_page_html(
                 current_item,
                 footer_mode,
                 footer_next_item,
                 current_block_name,
             )
-            st.components.v1.html(html_page, height=650, scrolling=True)
+            st.components.v1.html(html, height=650, scrolling=True)
 
 
 if __name__ == "__main__":

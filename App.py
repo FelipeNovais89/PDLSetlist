@@ -10,20 +10,11 @@ from googleapiclient.http import MediaIoBaseDownload
 
 
 # --------------------------------------------------------------------
-# 1. GOOGLE SHEETS – BANCO DE MÚSICAS
+# 1. CONEXÃO COM O GOOGLE SHEETS
 # --------------------------------------------------------------------
 @st.cache_data(ttl=300)
 def load_songs_df():
-    """
-    Lê o banco de músicas do Google Sheets.
-
-    Espera colunas:
-    - Título
-    - Artista
-    - Tom_Original
-    - BPM
-    - CifraDriveID (opcional, ID do arquivo .txt no Drive)
-    """
+    """Lê o banco de músicas do Google Sheets."""
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
 
@@ -50,8 +41,8 @@ def load_songs_df():
     return df
 
 
-def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm):
-    """Adiciona uma nova linha no Google Sheets (sem cifra ainda)."""
+def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_id: str):
+    """Adiciona uma nova linha no Google Sheets."""
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
 
@@ -61,38 +52,37 @@ def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm):
 
     sh = gc.open_by_key(sheet_id)
     ws = sh.sheet1
-    # Última coluna (CifraDriveID) vai vazia por enquanto
-    ws.append_row([title, artist, tom_original, bpm or "", ""])
+    ws.append_row([title, artist, tom_original, bpm or "", cifra_id or ""])
 
 
 # --------------------------------------------------------------------
-# 2. GOOGLE DRIVE – LEITURA DA CIFRA .TXT
+# 2. LER CIFRA DO GOOGLE DRIVE
 # --------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=300)
 def load_cifra_from_drive(file_id: str) -> str:
-    """
-    Lê um arquivo .txt no Google Drive pelo ID e devolve o conteúdo como string.
+    """Baixa o conteúdo .txt da cifra no Drive usando o ID."""
+    if not file_id:
+        return "CIFRA / TEXTO AQUI (ID do Drive não informado)."
 
-    Necessário:
-    - Drive API habilitada no projeto
-    - Arquivo compartilhado com o client_email da service account
-    """
-    secrets = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/drive.readonly"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
+    try:
+        secrets = st.secrets["gcp_service_account"]
+        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        creds = Credentials.from_service_account_info(secrets, scopes=scopes)
 
-    service = build("drive", "v3", credentials=creds)
+        service = build("drive", "v3", credentials=creds)
+        request = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
 
-    request = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
 
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-
-    fh.seek(0)
-    return fh.read().decode("utf-8", errors="ignore")
+        fh.seek(0)
+        content = fh.read().decode("utf-8", errors="ignore")
+        return content or "CIFRA / TEXTO VAZIO."
+    except Exception as e:
+        return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
 
 
 # --------------------------------------------------------------------
@@ -104,7 +94,10 @@ def init_state():
 
     if "blocks" not in st.session_state:
         st.session_state.blocks = [
-            {"name": "Bloco 1", "items": []}  # items: {type: "music"/"pause", ...}
+            {
+                "name": "Bloco 1",
+                "items": [],  # cada item: {type: "music"/"pause", ...}
+            }
         ]
 
     if "current_item" not in st.session_state:
@@ -152,10 +145,10 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
     Retorna (mode, next_item):
 
-    - "next_music": próxima música no MESMO bloco
-    - "next_pause": próxima é pausa no MESMO bloco
-    - "end_block":  não tem próxima no bloco, mas existem blocos depois
-    - "none":       acabou tudo (última música do último bloco)
+    - mode == "next_music"  -> próxima música no MESMO bloco
+    - mode == "next_pause"  -> próxima é pausa no MESMO bloco
+    - mode == "end_block"   -> não tem próxima no bloco, mas existem blocos depois
+    - mode == "none"        -> acabou tudo (última música do último bloco)
     """
     items = blocks[cur_block_idx]["items"]
 
@@ -170,15 +163,13 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     # Não tem próximo dentro do bloco: ver se existem blocos depois com músicas
     for b in range(cur_block_idx + 1, len(blocks)):
         if blocks[b]["items"]:
+            # Existe outro bloco com músicas depois -> fim de bloco
             return "end_block", None
 
     # Não tem nada depois -> fim do setlist
     return "none", None
 
 
-# --------------------------------------------------------------------
-# 6. HTML DO CABEÇALHO / RODAPÉ / PÁGINA
-# --------------------------------------------------------------------
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
     bpm_display = bpm if bpm not in (None, "", 0) else "BPM"
@@ -266,12 +257,31 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         artist = item.get("artist", "")
         tom = item.get("tom", "")
         bpm = item.get("bpm", "")
-        body = item.get(
-            "text",
-            "CIFRA / TEXTO AQUI (ainda não cadastrado).",
-        )
+
+        drive_id = item.get("drive_id", "")
+        if drive_id:
+            body = load_cifra_from_drive(drive_id)
+        else:
+            body = item.get(
+                "text",
+                "CIFRA / TEXTO AQUI (ainda não cadastrada ou sem ID do Drive).",
+            )
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
+
+    # --- Ajuste automático do tamanho da fonte (fit text) ---
+    lines = body.splitlines() if body else [""]
+    max_len = max((len(l) for l in lines), default=1)
+
+    BASE_COLS = 70   # nº de caracteres "ideais" na largura
+    MAX_FONT = 11    # fonte máxima (px)
+    MIN_FONT = 6     # fonte mínima (px)
+
+    if max_len <= BASE_COLS:
+        body_font_px = MAX_FONT
+    else:
+        scaled = MAX_FONT * BASE_COLS / max_len
+        body_font_px = max(MIN_FONT, int(scaled))
 
     # Monta o rodapé de acordo com o modo
     if footer_mode == "next_music" and footer_next_item is not None:
@@ -292,7 +302,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
     body_html = f"""
         <div class="sheet-body">
-          <pre class="sheet-body-text">{body}</pre>
+          <pre class="sheet-body-text" style="font-size:{body_font_px}px">{body}</pre>
         </div>
     """
 
@@ -353,9 +363,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             min-height: 420px;
         }}
         .sheet-body-text {{
-            white-space: pre-wrap;
-            font-size: 10px;
+            white-space: pre;      /* não quebra linha, mantém os espaços */
             line-height: 1.3;
+            word-break: keep-all;
         }}
 
         /* Rodapé base */
@@ -466,7 +476,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 # --------------------------------------------------------------------
-# 7. INTERFACE – EDITOR DE BLOCOS
+# 6. INTERFACE
 # --------------------------------------------------------------------
 def render_block_editor(block, block_idx, songs_df):
     st.markdown(f"### Bloco {block_idx + 1}")
@@ -579,6 +589,7 @@ def render_block_editor(block, block_idx, songs_df):
                     "tom": row.get("Tom_Original", ""),
                     "bpm": row.get("BPM", ""),
                     "text": "",
+                    "drive_id": row.get("CifraDriveID", ""),
                 }
                 block["items"].append(item)
             st.session_state[f"show_add_music_{block_idx}"] = False
@@ -596,20 +607,18 @@ def render_song_database():
         artist = st.text_input("Artista")
         tom_original = st.text_input("Tom original (ex.: Fm, C, Gm...)")
         bpm = st.text_input("BPM")
+        cifra_id = st.text_input("ID da cifra no Drive (opcional)")
 
         if st.button("Salvar no banco"):
             if title.strip() == "":
                 st.warning("Preencha pelo menos o título.")
             else:
-                append_song_to_sheet(title, artist, tom_original, bpm)
+                append_song_to_sheet(title, artist, tom_original, bpm, cifra_id)
                 st.success("Música adicionada ao Google Sheets!")
                 st.session_state.songs_df = load_songs_df()
                 st.rerun()
 
 
-# --------------------------------------------------------------------
-# 8. MAIN
-# --------------------------------------------------------------------
 def main():
     st.set_page_config(
         page_title="PDL Setlist",
@@ -679,34 +688,7 @@ def main():
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            # Se for música, tenta carregar a cifra do Drive
-            if current_item["type"] == "music":
-                df = st.session_state.songs_df
-                title = current_item.get("title", "")
-                row_match = df[df["Título"] == title]
-                if not row_match.empty:
-                    row = row_match.iloc[0]
-                    file_id = row.get("CifraDriveID", "")
-                    if file_id:
-                        try:
-                            cifra_text = load_cifra_from_drive(file_id)
-                            current_item["text"] = (
-                                cifra_text or "(Cifra vazia no arquivo do Drive.)"
-                            )
-                        except Exception as e:
-                            msg = f"Erro ao carregar cifra do Drive (ID: {file_id}): {e}"
-                            current_item["text"] = msg
-                            st.error(msg)
-                    else:
-                        current_item["text"] = (
-                            "Nenhum CifraDriveID definido para esta música na planilha."
-                        )
-                else:
-                    current_item["text"] = (
-                        f"Música '{title}' não encontrada na planilha."
-                    )
-
-            # Descobre o que vai no rodapé desta página
+            # Descobre o que vai no rodapé desta página (próxima música, pausa ou fim de bloco)
             footer_mode, footer_next_item = get_footer_context(
                 blocks, cur_block_idx, cur_item_idx
             )
@@ -722,3 +704,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```0

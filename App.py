@@ -672,6 +672,19 @@ def main():
         page_icon="🎵",
     )
 
+    # Força Courier New nas text areas (edição de cifras)
+    st.markdown(
+        """
+        <style>
+        .stTextArea textarea {
+            font-family: "Courier New", monospace !important;
+            font-size: 14px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     init_state()
 
     st.markdown(f"### Setlist: {st.session_state.setlist_name}")

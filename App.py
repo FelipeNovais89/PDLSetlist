@@ -326,13 +326,18 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             background: #111;
         }}
         .sheet {{
-            width: 100%;
-            height: 100%;
-            background: white;
-            padding: 16px 24px;
-            box-sizing: border-box;
-            font-family: "Courier New", monospace;
-        }}
+    /* tamanho fixo parecido com A4 em pixels */
+    width: 800px;          /* largura aproximada de A4 */
+    height: 1130px;        /* altura aproximada de A4 */
+    background: white;
+
+    /* margens internas (equivalentes às margens do PDF) */
+    padding: 10px 10px 10px 10px;  /* top, right, bottom, left */
+
+    box-sizing: border-box;
+    font-family: "Courier New", monospace;
+    margin: 0 auto;        /* centraliza a “folha” na tela */
+}}
 
         .sheet-header {{
             display: grid;
@@ -485,9 +490,9 @@ def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    margin_x = 20 * mm
-    top_margin = 20 * mm
-    bottom_margin = 20 * mm
+    margin_x = 10 * mm
+    top_margin = 10 * mm
+    bottom_margin = 10 * mm
     line_h = 4 * mm
 
     for b_idx, block in enumerate(blocks):
@@ -850,7 +855,7 @@ def main():
                 footer_next_item,
                 current_block_name,
             )
-            st.components.v1.html(html, height=650, scrolling=True)
+            st.components.v1.html(html, height=1200, scrolling=True)
 
             flat_items = []
             for b_idx, block in enumerate(blocks):

@@ -273,9 +273,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     lines = body.splitlines() if body else [""]
     max_len = max((len(l) for l in lines), default=1)
 
-    BASE_COLS = 70   # nº de caracteres "ideais" na largura
+    BASE_COLS = 60   # nº de caracteres "ideais" na largura
     MAX_FONT = 11    # fonte máxima (px)
-    MIN_FONT = 4     # fonte mínima (px)
+    MIN_FONT = 2     # fonte mínima (px)
 
     if max_len <= BASE_COLS:
         body_font_px = MAX_FONT

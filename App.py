@@ -674,7 +674,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             width: 800px;
             height: 1130px;
             background: white;
-            padding: 40px 40px 60px 40px;
+            padding: 5px 5px 5px 5px;
             box-sizing: border-box;
             font-family: "Courier New", monospace;
             margin: 0 auto;
@@ -701,25 +701,25 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         .sheet-header-main .sheet-title {{
             font-weight: 700;
             text-transform: uppercase;
-            font-size: 8px;
+            font-size: 12px;
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;
-            font-size: 6px;
+            font-size: 10px;
         }}
         .sheet-label {{
             font-weight: 700;
             text-align: center;
-            font-size: 8px;
+            font-size: 12px;
         }}
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 6px;
+            font-size: 10px;
         }}
 
         .sheet-body {{
-            padding: 12px 8px 12px 8px;
+            padding: 5px 5px 5px 5px;
             min-height: 420px;
         }}
 
@@ -732,7 +732,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
 
         .sheet-footer {{
-            font-size: 8px;
+            font-size: 12px;
             margin-top: auto;
             padding-top: 4px;
             border-top: 1px solid #ccc;

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -9,10 +10,163 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
-# PDF
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import mm
+# --------------------------------------------------------------------
+# 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
+# --------------------------------------------------------------------
+NOTE_SEQ_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+NOTE_SEQ_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
+NOTE_TO_INDEX = {
+    "C": 0,
+    "C#": 1,
+    "Db": 1,
+    "D": 2,
+    "D#": 3,
+    "Eb": 3,
+    "E": 4,
+    "F": 5,
+    "F#": 6,
+    "Gb": 6,
+    "G": 7,
+    "G#": 8,
+    "Ab": 8,
+    "A": 9,
+    "A#": 10,
+    "Bb": 10,
+    "B": 11,
+}
+
+
+def split_root_and_suffix(symbol: str):
+    """
+    Separa a raiz (C, D#, Bb...) do sufixo (m, 7, 7/9, etc).
+    Ex: "Dm7/5-" -> ("D", "m7/5-")
+    """
+    s = (symbol or "").strip()
+    if not s:
+        return "", ""
+    root = s[0].upper()
+    idx = 1
+    if len(s) > 1 and s[1] in ("#", "b"):
+        root += s[1]
+        idx = 2
+    suffix = s[idx:]
+    return root, suffix
+
+
+def parse_root_from_key(key: str):
+    """Só a raiz do Tom (C, D#, Bb...)."""
+    root, _ = split_root_and_suffix(key)
+    return root or None
+
+
+def semitone_diff(orig_key: str, target_key: str) -> int:
+    """Diferença em semitons entre Tom_Original e Tom."""
+    r1 = parse_root_from_key(orig_key)
+    r2 = parse_root_from_key(target_key)
+    if not r1 or not r2:
+        return 0
+    i1 = NOTE_TO_INDEX.get(r1)
+    i2 = NOTE_TO_INDEX.get(r2)
+    if i1 is None or i2 is None:
+        return 0
+    return (i2 - i1) % 12
+
+
+def transpose_root(root: str, steps: int) -> str:
+    """Transpõe apenas a raiz, mantendo #/b coerente."""
+    if steps == 0:
+        return root
+    idx = NOTE_TO_INDEX.get(root)
+    if idx is None:
+        return root
+
+    # mantém linguagem: se era bemol, usa escala com b; se era sustenido, usa #
+    if "b" in root:
+        scale = NOTE_SEQ_FLAT
+    elif "#" in root:
+        scale = NOTE_SEQ_SHARP
+    else:
+        # padrão: sustenido
+        scale = NOTE_SEQ_SHARP
+
+    return scale[(idx + steps) % 12]
+
+
+def transpose_key_by_semitones(key: str, steps: int) -> str:
+    """Transpõe um Tom (ex: Dm -> D#m, C -> Db)."""
+    key = (key or "").strip()
+    if not key or steps == 0:
+        return key
+    root, suffix = split_root_and_suffix(key)
+    if not root:
+        return key
+    new_root = transpose_root(root, steps)
+    return new_root + suffix
+
+
+def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
+    """
+    Transpõe apenas as linhas de cifra (que começam com '|') dentro do texto.
+    """
+    steps = semitone_diff(tom_original, tom_destino)
+    if steps == 0:
+        return body
+
+    lines = body.splitlines()
+    new_lines = []
+
+    for line in lines:
+        if not line.startswith("|"):
+            # não é linha de cifra -> mantém
+            new_lines.append(line)
+            continue
+
+        marker = line[0]
+        text = line[1:]
+
+        def repl(match: re.Match):
+            root = match.group(1)
+            return transpose_root(root, steps)
+
+        # Acordes: raiz A–G com opcional # ou b
+        transposed = re.sub(r"([A-G](?:#|b)?)", repl, text)
+        new_lines.append(marker + transposed)
+
+    return "\n".join(new_lines)
+
+
+def normalize_lyrics_indent(text: str) -> str:
+    """
+    Remove APENAS 1 espaço do começo das linhas que NÃO são de cifra (sem '|').
+    Assim você ainda pode usar mais espaços para marcar refrão/estrofe.
+    """
+    lines = text.splitlines()
+    out = []
+    for line in lines:
+        if line.startswith("|"):
+            out.append(line)
+        else:
+            if line.startswith(" "):
+                out.append(line[1:])
+            else:
+                out.append(line)
+    return "\n".join(out)
+
+
+def strip_chord_markers_for_display(text: str) -> str:
+    """
+    Remove o '|' das linhas de cifra só para exibir no preview/PDF.
+    """
+    lines = text.splitlines()
+    out = []
+    for line in lines:
+        if line.startswith("|"):
+            out.append(line[1:])
+        else:
+            out.append(line)
+    return "\n".join(out)
+
 
 # --------------------------------------------------------------------
 # 1. GOOGLE SHEETS – BANCO DE MÚSICAS
@@ -116,7 +270,6 @@ def save_chord_to_drive(file_id: str, content: str):
             supportsAllDrives=True,
         ).execute()
 
-        # limpa cache da leitura para carregar a versão nova
         load_chord_from_drive.clear()
 
     except HttpError as e:
@@ -180,6 +333,15 @@ def delete_block(block_idx):
 # 5. LÓGICA DO RODAPÉ
 # --------------------------------------------------------------------
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
+    """
+    Decide o que mostrar no rodapé da página atual.
+
+    Retorna (mode, next_item):
+    - "next_music"  -> próxima música no MESMO bloco
+    - "next_pause"  -> próxima é pausa no MESMO bloco
+    - "end_block"   -> acabou bloco mas tem próximo bloco
+    - "none"        -> acabou tudo
+    """
     items = blocks[cur_block_idx]["items"]
 
     if cur_item_idx + 1 < len(items):
@@ -271,26 +433,39 @@ def build_footer_end_of_block():
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
+    # Dados da música/pausa atual
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
         artist = block_name
         tom = ""
         bpm = ""
-        body = "PAUSA / INTERVALO"
+        raw_body = "PAUSA / INTERVALO"
+        tom_original = ""
+        tom_atual = ""
     else:
         title = item.get("title", "NOVA MÚSICA")
         artist = item.get("artist", "")
-        tom = item.get("tom", "")
+        tom_original = item.get("tom_original", "") or item.get("tom", "")
+        tom = item.get("tom", tom_original)
         bpm = item.get("bpm", "")
-        cifra_id = item.get("cifra_id", "")
 
+        cifra_id = item.get("cifra_id", "")
         if cifra_id:
-            body = load_chord_from_drive(cifra_id)
+            raw_body = load_chord_from_drive(cifra_id)
         else:
-            body = item.get(
+            raw_body = item.get(
                 "text",
                 "CIFRA / TEXTO AQUI (ainda não cadastrada).",
             )
+        tom_atual = tom
+
+    # Transposição + alinhamento (somente se for música)
+    if item["type"] == "pause":
+        body_final = raw_body
+    else:
+        body_transposed = transpose_body_text(raw_body, tom_original, tom_atual)
+        body_norm = normalize_lyrics_indent(body_transposed)
+        body_final = strip_chord_markers_for_display(body_norm)
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
 
@@ -312,10 +487,11 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
     body_html = f"""
         <div class="sheet-body">
-          <pre class="sheet-body-text">{body}</pre>
+          <pre class="sheet-body-text">{body_final}</pre>
         </div>
     """
 
+    # HTML completo (preview)
     return f"""
     <html>
     <head>
@@ -326,18 +502,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             background: #111;
         }}
         .sheet {{
-    /* tamanho fixo parecido com A4 em pixels */
-    width: 800px;          /* largura aproximada de A4 */
-    height: 1130px;        /* altura aproximada de A4 */
-    background: white;
-
-    /* margens internas (equivalentes às margens do PDF) */
-    padding: 10px 10px 10px 10px;  /* top, right, bottom, left */
-
-    box-sizing: border-box;
-    font-family: "Courier New", monospace;
-    margin: 0 auto;        /* centraliza a “folha” na tela */
-}}
+            width: 800px;
+            height: 1130px;
+            background: white;
+            padding: 40px 40px 60px 40px;
+            box-sizing: border-box;
+            font-family: "Courier New", monospace;
+            margin: 0 auto;
+        }}
 
         .sheet-header {{
             display: grid;
@@ -378,6 +550,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         }}
         .sheet-body-text {{
             white-space: pre-wrap;
+            font-family: "Courier New", monospace;
             font-size: 10px;
             line-height: 1.3;
         }}
@@ -483,101 +656,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 # --------------------------------------------------------------------
-# 6b. PDF DO SETLIST INTEIRO
-# --------------------------------------------------------------------
-def create_pdf_for_setlist(blocks, setlist_name: str) -> bytes:
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    margin_x = 10 * mm
-    top_margin = 10 * mm
-    bottom_margin = 10 * mm
-    line_h = 4 * mm
-
-    for b_idx, block in enumerate(blocks):
-        block_name = block["name"]
-        items = block["items"]
-        for i_idx, item in enumerate(items):
-            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
-
-            if item["type"] == "pause":
-                title = item.get("label", "PAUSA")
-                artist = block_name
-                tom = ""
-                bpm = ""
-                body = "PAUSA / INTERVALO"
-            else:
-                title = item.get("title", "NOVA MÚSICA")
-                artist = item.get("artist", "")
-                tom = item.get("tom", "")
-                bpm = item.get("bpm", "")
-
-                cifra_id = item.get("cifra_id", "")
-                if cifra_id:
-                    body = load_chord_from_drive(cifra_id)
-                else:
-                    body = item.get("text", "")
-
-            c.setFont("Courier", 10)
-            y = height - top_margin
-
-            c.drawString(
-                margin_x,
-                y,
-                f"{setlist_name}  –  {block_name}",
-            )
-            y -= line_h * 1.5
-
-            c.setFont("Courier-Bold", 11)
-            c.drawString(margin_x, y, (title or "").upper())
-            y -= line_h
-            c.setFont("Courier", 10)
-            if artist:
-                c.drawString(margin_x, y, artist)
-                y -= line_h
-
-            header_tom = f"TOM: {tom or '-'}"
-            header_bpm = f"BPM: {bpm or '-'}"
-            c.drawString(margin_x, y, header_tom)
-            c.drawRightString(width - margin_x, y, header_bpm)
-            y -= line_h
-            c.line(margin_x, y, width - margin_x, y)
-            y -= line_h
-
-            c.setFont("Courier", 9.5)
-            for line in (body or "").splitlines():
-                if y < bottom_margin + 15 * mm:
-                    break
-                c.drawString(margin_x, y, line)
-                y -= line_h
-
-            footer_text = ""
-            if footer_mode == "next_music" and footer_next_item is not None:
-                n_title = footer_next_item.get("title", "")
-                n_tom = footer_next_item.get("tom", "")
-                n_bpm = footer_next_item.get("bpm", "")
-                footer_text = (
-                    f"PRÓXIMA: {n_title}  |  TOM {n_tom or '-'}  BPM {n_bpm or '-'}"
-                )
-            elif footer_mode == "next_pause" and footer_next_item is not None:
-                label = footer_next_item.get("label", "Pausa")
-                footer_text = f"PRÓXIMA: {label.upper()}"
-            elif footer_mode == "end_block":
-                footer_text = "FIM DE BLOCO"
-
-            if footer_text:
-                c.setFont("Courier", 9)
-                c.drawString(margin_x, bottom_margin, footer_text)
-
-            c.showPage()
-
-    c.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-# --------------------------------------------------------------------
 # 7. INTERFACE – EDITOR DE BLOCOS
 # --------------------------------------------------------------------
 def render_block_editor(block, block_idx, songs_df):
@@ -628,16 +706,28 @@ def render_block_editor(block, block_idx, songs_df):
                 )
                 item["bpm"] = new_bpm
 
-                tom_val = item.get("tom", item.get("tom_original", ""))
-                new_tom = c3.text_input(
-                    "Tom",
-                    value=tom_val,
-                    key=f"tom_{block_idx}_{i}",
-                    placeholder="Tom",
-                    label_visibility="collapsed",
-                )
-                item["tom"] = new_tom
+                # ----- CONTROLE DE TOM: [-½] [Tom] [+½] -----
+                tom_original = item.get("tom_original", "") or item.get("tom", "")
+                tom_val = item.get("tom", tom_original)
 
+                col_minus, col_label, col_plus = c3.columns([1, 2, 1])
+
+                if col_minus.button("−½", key=f"tom_minus_{block_idx}_{i}"):
+                    base_key = item.get("tom", tom_original) or tom_original
+                    item["tom"] = transpose_key_by_semitones(base_key, -1)
+                    st.rerun()
+
+                col_label.markdown(
+                    f"<div style='text-align:center; font-size:12px;'><strong>{tom_val or '-'}</strong></div>",
+                    unsafe_allow_html=True,
+                )
+
+                if col_plus.button("+½", key=f"tom_plus_{block_idx}_{i}"):
+                    base_key = item.get("tom", tom_original) or tom_original
+                    item["tom"] = transpose_key_by_semitones(base_key, +1)
+                    st.rerun()
+
+                # ----- CIFRA (ver/editar) -----
                 cifra_id = item.get("cifra_id", "")
                 with c1.expander("Ver cifra"):
                     if cifra_id:
@@ -668,7 +758,7 @@ def render_block_editor(block, block_idx, songs_df):
                         label_visibility="collapsed",
                     )
 
-                    # CSS global para os textareas
+                    # CSS global para textareas -> Courier New
                     st.markdown(
                         f"""
                         <style>
@@ -856,42 +946,6 @@ def main():
                 current_block_name,
             )
             st.components.v1.html(html, height=1200, scrolling=True)
-
-            flat_items = []
-            for b_idx, block in enumerate(blocks):
-                for i_idx, _it in enumerate(block["items"]):
-                    flat_items.append((b_idx, i_idx))
-
-            total_pages = len(flat_items)
-            try:
-                current_pos = flat_items.index((cur_block_idx, cur_item_idx))
-            except ValueError:
-                current_pos = 0
-
-            nav_prev, nav_info, nav_next, nav_pdf = st.columns([1, 2, 1, 3])
-
-            if nav_prev.button("⬅️", disabled=(current_pos <= 0)):
-                new_pos = max(0, current_pos - 1)
-                st.session_state.current_item = flat_items[new_pos]
-                st.rerun()
-
-            nav_info.markdown(
-                f"<div style='text-align:center;'>Página {current_pos+1} de {total_pages}</div>",
-                unsafe_allow_html=True,
-            )
-
-            if nav_next.button("➡️", disabled=(current_pos >= total_pages - 1)):
-                new_pos = min(total_pages - 1, current_pos + 1)
-                st.session_state.current_item = flat_items[new_pos]
-                st.rerun()
-
-            pdf_bytes = create_pdf_for_setlist(blocks, st.session_state.setlist_name)
-            nav_pdf.download_button(
-                "💾 PDF do setlist inteiro",
-                data=pdf_bytes,
-                file_name=f"{st.session_state.setlist_name.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-            )
 
 
 if __name__ == "__main__":

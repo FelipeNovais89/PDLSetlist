@@ -645,7 +645,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
             /* fundo e estilo */
             background: white;
-            padding: 40px 40px 60px 40px;
+            padding: 5px 5px 5px 5px;
             box-sizing: border-box;
             font-family: "Courier New", monospace;
             margin: 0 auto;

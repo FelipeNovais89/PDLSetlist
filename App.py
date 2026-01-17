@@ -635,8 +635,15 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             background: #111;
         }}
         .sheet {{
-            width: 800px;
-            height: 1130px;
+            /* ocupa sempre a largura disponível do iframe,
+               mas nunca passa de 800px (que é o tamanho do PDF) */
+            width: 100%;
+            max-width: 800px;
+
+            /* mantém a proporção da folha (largura x altura) */
+            aspect-ratio: 800 / 1130;
+
+            /* fundo e estilo */
             background: white;
             padding: 40px 40px 60px 40px;
             box-sizing: border-box;

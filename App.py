@@ -599,7 +599,34 @@ def compute_page_fields(item, block_name):
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    title, artist, tom, bpm, body_final = compute_page_fields(item, block_name)
+    if item["type"] == "pause":
+        title = item.get("label", "PAUSA")
+        artist = block_name
+        tom = ""
+        bpm = ""
+        raw_body = "PAUSA / INTERVALO"
+        tom_original = ""
+        tom_atual = ""
+    else:
+        title = item.get("title", "NOVA MÚSICA")
+        artist = item.get("artist", "")
+        tom_original = item.get("tom_original", "") or item.get("tom", "")
+        tom = item.get("tom", tom_original)
+        bpm = item.get("bpm", "")
+
+        cifra_id = item.get("cifra_id", "")
+        if cifra_id:
+            raw_body = load_chord_from_drive(cifra_id)
+        else:
+            raw_body = item.get("text", "CIFRA / TEXTO AQUI (ainda não cadastrada).")
+        tom_atual = tom
+
+    if item["type"] == "pause":
+        body_final = raw_body
+    else:
+        body_transposed = transpose_body_text(raw_body, tom_original, tom_atual)
+        body_norm = normalize_lyrics_indent(body_transposed)
+        body_final = strip_chord_markers_for_display(body_norm)
 
     header_html = build_sheet_header_html(title, artist, tom, bpm)
 
@@ -634,21 +661,28 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             padding: 16px;
             background: #111;
         }}
+
+        /* wrapper que ocupa 100% da largura do dispositivo */
+        .sheet-viewport {{
+            width: 100vw;
+            max-width: 100%;
+            overflow-x: hidden;
+        }}
+
+        /* folha "lógica" de 800 px que é escalada para caber em 100vw */
         .sheet {{
-            /* ocupa sempre a largura disponível do iframe,
-               mas nunca passa de 800px (que é o tamanho do PDF) */
-            width: 100%;
-            max-width: 800px;
-
-            /* mantém a proporção da folha (largura x altura) */
-            aspect-ratio: 800 / 1130;
-
-            /* fundo e estilo */
+            width: 800px;
+            height: 1130px;
             background: white;
-            padding: 5px 5px 5px 5px;
+            padding: 40px 40px 60px 40px;
             box-sizing: border-box;
             font-family: "Courier New", monospace;
             margin: 0 auto;
+
+            /* aqui é a mágica: escala proporcional à largura da tela,
+               mas nunca cresce além de 1 (800px) */
+            transform-origin: top left;
+            transform: scale(calc(min(100vw, 800px) / 800));
         }}
 
         .sheet-header {{
@@ -688,10 +722,12 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             padding: 12px 8px 12px 8px;
             min-height: 420px;
         }}
+
         .sheet-body-text {{
-            white-space: pre-wrap;
+            /* NUNCA QUEBRAR LINHA */
+            white-space: pre;
             font-family: "Courier New", monospace;
-            font-size: 10px;
+            font-size: 10px;        /* tamanho base (PDF usa isso) */
             line-height: 1.3;
         }}
 
@@ -701,29 +737,24 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             padding-top: 4px;
             border-top: 1px solid #ccc;
         }}
-
         .sheet-footer-grid {{
             display: flex;
             flex-direction: column;
         }}
-
         .sheet-next-label {{
             font-weight: 700;
             margin-bottom: 2px;
             text-align: left;
         }}
-
         .sheet-next-header-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
-
         .sheet-next-title {{
             font-weight: 700;
             text-transform: uppercase;
         }}
-
         .sheet-next-tombpm-header {{
             display: grid;
             grid-template-columns: 1fr 0.25fr;
@@ -732,18 +763,15 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             margin-right: 16px;
             text-align: center;
         }}
-
         .sheet-next-tom-header,
         .sheet-next-bpm-header {{
             font-weight: 700;
         }}
-
         .sheet-next-values-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
-
         .sheet-next-tombpm-values {{
             display: grid;
             grid-template-columns: 1fr 0.25fr;
@@ -752,32 +780,26 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             margin-right: 16px;
             text-align: center;
         }}
-
         .sheet-footer-center {{
             padding-top: 6px;
         }}
-
         .sheet-next-pause-wrapper {{
             display: flex;
             justify-content: center;
             margin-top: 4px;
         }}
-
         .sheet-next-pause {{
             font-size: 12px;
             font-weight: 700;
         }}
-
         .sheet-footer-endblock {{
             padding-top: 6px;
         }}
-
         .sheet-endblock-wrapper {{
             display: flex;
             justify-content: center;
             margin-top: 4px;
         }}
-
         .sheet-endblock-text {{
             font-size: 12px;
             font-weight: 700;
@@ -785,10 +807,12 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       </style>
     </head>
     <body>
-      <div class="sheet">
-        {header_html}
-        {body_html}
-        {footer_html}
+      <div class="sheet-viewport">
+        <div class="sheet">
+          {header_html}
+          {body_html}
+          {footer_html}
+        </div>
       </div>
     </body>
     </html>

@@ -111,7 +111,6 @@ def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
     new_lines = []
 
     for line in lines:
-        # Linha de cifras marcada com "|"
         if not line.startswith("|"):
             new_lines.append(line)
             continue
@@ -123,7 +122,6 @@ def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
             root = match.group(1)
             return transpose_root(root, steps)
 
-        # Transpõe qualquer root [A-G] com opcional # ou b
         transposed = re.sub(r"([A-G](?:#|b)?)", repl, text)
         new_lines.append(marker + transposed)
 
@@ -156,19 +154,26 @@ def strip_chord_markers_for_display(text: str) -> str:
 
 
 # --------------------------------------------------------------------
-# 1. GOOGLE SHEETS – BANCO DE MÚSICAS
+# 1. GOOGLE SHEETS – CLIENTE E BANCO DE MÚSICAS (ABA 1)
 # --------------------------------------------------------------------
-@st.cache_data(ttl=300)
-def load_songs_df():
+def get_gspread_client():
     secrets = st.secrets["gcp_service_account"]
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(secrets, scopes=scopes)
     gc = gspread.authorize(creds)
+    return gc
 
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.sheet1
+
+def get_spreadsheet():
+    gc = get_gspread_client()
+    sheet_id = st.secrets["sheets"]["sheet_id"]
+    return gc.open_by_key(sheet_id)
+
+
+@st.cache_data(ttl=300)
+def load_songs_df():
+    sh = get_spreadsheet()
+    ws = sh.sheet1  # primeira aba = banco de músicas
 
     records = ws.get_all_records()
     if not records:
@@ -186,20 +191,193 @@ def load_songs_df():
 
 
 def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_id: str):
-    secrets = st.secrets["gcp_service_account"]
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-    gc = gspread.authorize(creds)
-
-    sh = gc.open_by_key(sheet_id)
+    sh = get_spreadsheet()
     ws = sh.sheet1
     ws.append_row([title, artist, tom_original, bpm or "", cifra_id or ""])
+    load_songs_df.clear()
 
 
 # --------------------------------------------------------------------
-# 2. GOOGLE DRIVE – CIFRAS .TXT
+# 2. GOOGLE SHEETS – UMA ABA POR SETLIST
+# --------------------------------------------------------------------
+SETLIST_COLS = [
+    "BlockIndex",
+    "BlockName",
+    "ItemIndex",
+    "ItemType",
+    "SongTitle",
+    "Artist",
+    "Tom",
+    "BPM",
+    "CifraDriveID",
+    "PauseLabel",
+]
+
+
+def list_setlist_names():
+    """
+    Retorna a lista de nomes de abas que serão tratadas como setlists.
+    Convenção:
+      - sheet1 = banco de músicas
+      - todas as outras abas = setlists
+    """
+    sh = get_spreadsheet()
+    worksheets = sh.worksheets()
+    # primeira aba é o banco de músicas
+    setlists = [ws.title for ws in worksheets[1:]]
+    return setlists
+
+
+def get_or_create_setlist_ws(name: str):
+    """Abre (ou cria) a worksheet com esse nome para a setlist."""
+    sh = get_spreadsheet()
+    name = (name or "").strip() or "Setlist sem nome"
+
+    # tenta abrir
+    for ws in sh.worksheets():
+        if ws.title == name:
+            return ws
+
+    # se não existe, cria
+    ws = sh.add_worksheet(title=name, rows=1000, cols=len(SETLIST_COLS))
+    ws.append_row(SETLIST_COLS)
+    return ws
+
+
+def load_setlist_df(name: str) -> pd.DataFrame:
+    """Lê a aba da setlist (pelo nome) em um DataFrame."""
+    sh = get_spreadsheet()
+    try:
+        ws = sh.worksheet(name)
+    except gspread.WorksheetNotFound:
+        # se não existir, retorna DF vazio
+        df = pd.DataFrame(columns=SETLIST_COLS)
+        return df
+
+    records = ws.get_all_records()
+    if not records:
+        df = pd.DataFrame(columns=SETLIST_COLS)
+    else:
+        df = pd.DataFrame(records)
+
+    for col in SETLIST_COLS:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df
+
+
+def write_setlist_df(name: str, df: pd.DataFrame):
+    """Sobrescreve a aba da setlist (pelo nome) com o DF fornecido."""
+    ws = get_or_create_setlist_ws(name)
+    ws.clear()
+    ws.append_row(SETLIST_COLS)
+    if not df.empty:
+        ws.append_rows(df[SETLIST_COLS].values.tolist())
+
+
+def save_current_setlist_to_sheet():
+    """Pega blocks do session_state e grava na aba da setlist (uma aba por setlist)."""
+    name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
+
+    blocks = st.session_state.blocks
+    rows = []
+    for b_idx, block in enumerate(blocks):
+        block_name = block.get("name", f"Bloco {b_idx + 1}")
+        items = block.get("items", [])
+        for i_idx, item in enumerate(items):
+            base = {
+                "BlockIndex": b_idx + 1,
+                "BlockName": block_name,
+                "ItemIndex": i_idx + 1,
+                "ItemType": item["type"],
+                "SongTitle": "",
+                "Artist": "",
+                "Tom": "",
+                "BPM": "",
+                "CifraDriveID": "",
+                "PauseLabel": "",
+            }
+            if item["type"] == "music":
+                base["SongTitle"] = item.get("title", "")
+                base["Artist"] = item.get("artist", "")
+                base["Tom"] = item.get("tom", "")
+                base["BPM"] = item.get("bpm", "")
+                base["CifraDriveID"] = item.get("cifra_id", "")
+            else:
+                base["PauseLabel"] = item.get("label", "Pausa")
+
+            rows.append(base)
+
+    df_new = pd.DataFrame(rows, columns=SETLIST_COLS)
+    write_setlist_df(name, df_new)
+
+
+def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
+    """Lê a aba (setlist_name) e monta blocks em session_state."""
+    df_sel = load_setlist_df(setlist_name)
+    if df_sel.empty:
+        return
+
+    df_sel["BlockIndex"] = pd.to_numeric(df_sel["BlockIndex"], errors="coerce").fillna(0).astype(int)
+    df_sel["ItemIndex"] = pd.to_numeric(df_sel["ItemIndex"], errors="coerce").fillna(0).astype(int)
+    df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
+
+    blocks = []
+    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
+        items = []
+        for _, row in group.iterrows():
+            if row["ItemType"] == "pause":
+                items.append(
+                    {
+                        "type": "pause",
+                        "label": row.get("PauseLabel", "Pausa"),
+                    }
+                )
+            else:
+                title = row.get("SongTitle", "")
+                artist = row.get("Artist", "")
+                tom_saved = row.get("Tom", "")
+                bpm_saved = row.get("BPM", "")
+                cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
+
+                song_row = songs_df[songs_df["Título"] == title]
+                if not song_row.empty:
+                    song_row = song_row.iloc[0]
+                    tom_original = song_row.get("Tom_Original", "") or tom_saved
+                    cifra_id = str(song_row.get("CifraDriveID", "")).strip() or cifra_id_saved
+                else:
+                    tom_original = tom_saved
+                    cifra_id = cifra_id_saved
+
+                items.append(
+                    {
+                        "type": "music",
+                        "title": title,
+                        "artist": artist,
+                        "tom_original": tom_original,
+                        "tom": tom_saved or tom_original,
+                        "bpm": bpm_saved,
+                        "cifra_id": cifra_id,
+                        "text": "",
+                    }
+                )
+
+        blocks.append(
+            {
+                "name": block_name or f"Bloco {len(blocks) + 1}",
+                "items": items,
+            }
+        )
+
+    st.session_state.blocks = blocks
+    st.session_state.setlist_name = setlist_name
+    st.session_state.current_item = None
+    st.session_state.screen = "editor"
+
+
+# --------------------------------------------------------------------
+# 3. GOOGLE DRIVE – CIFRAS .TXT
 # --------------------------------------------------------------------
 def get_drive_service():
     secrets = st.secrets["gcp_service_account"]
@@ -259,7 +437,7 @@ def save_chord_to_drive(file_id: str, content: str):
 
 
 # --------------------------------------------------------------------
-# 3. ESTADO INICIAL
+# 4. ESTADO INICIAL
 # --------------------------------------------------------------------
 def init_state():
     if "songs_df" not in st.session_state:
@@ -279,37 +457,12 @@ def init_state():
     if "cifra_font_size" not in st.session_state:
         st.session_state.cifra_font_size = 14
 
-
-# --------------------------------------------------------------------
-# 4. HELPERS
-# --------------------------------------------------------------------
-def move_item(block_idx, item_idx, direction):
-    items = st.session_state.blocks[block_idx]["items"]
-    new_idx = item_idx + direction
-    if 0 <= new_idx < len(items):
-        items[item_idx], items[new_idx] = items[new_idx], items[item_idx]
-
-
-def delete_item(block_idx, item_idx):
-    items = st.session_state.blocks[block_idx]["items"]
-    del items[item_idx]
-
-
-def move_block(block_idx, direction):
-    blocks = st.session_state.blocks
-    new_idx = block_idx + direction
-    if 0 <= new_idx < len(blocks):
-        blocks[block_idx], blocks[new_idx] = blocks[new_idx], blocks[block_idx]
-
-
-def delete_block(block_idx):
-    blocks = st.session_state.blocks
-    if len(blocks) > 1:
-        del blocks[block_idx]
+    if "screen" not in st.session_state:
+        st.session_state.screen = "home"  # tela inicial
 
 
 # --------------------------------------------------------------------
-# 5. RODAPÉ
+# 5. RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
 # --------------------------------------------------------------------
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     items = blocks[cur_block_idx]["items"]
@@ -329,7 +482,7 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 # --------------------------------------------------------------------
-# 6. HTML
+# 6. HTML (HEADER / FOOTER / PÁGINA)
 # --------------------------------------------------------------------
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
@@ -554,7 +707,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             column-gap: 4pt;
             min-width: 70px;
             margin-right: 16px;
-            text-align: center.
+            text-align: center;
         }}
 
         .sheet-next-tom-header,
@@ -622,6 +775,31 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # --------------------------------------------------------------------
 # 7. EDITOR DE BLOCOS
 # --------------------------------------------------------------------
+def move_item(block_idx, item_idx, direction):
+    items = st.session_state.blocks[block_idx]["items"]
+    new_idx = item_idx + direction
+    if 0 <= new_idx < len(items):
+        items[item_idx], items[new_idx] = items[new_idx], items[item_idx]
+
+
+def delete_item(block_idx, item_idx):
+    items = st.session_state.blocks[block_idx]["items"]
+    del items[item_idx]
+
+
+def move_block(block_idx, direction):
+    blocks = st.session_state.blocks
+    new_idx = block_idx + direction
+    if 0 <= new_idx < len(blocks):
+        blocks[block_idx], blocks[new_idx] = blocks[new_idx], blocks[block_idx]
+
+
+def delete_block(block_idx):
+    blocks = st.session_state.blocks
+    if len(blocks) > 1:
+        del blocks[block_idx]
+
+
 def render_block_editor(block, block_idx, songs_df):
     st.markdown(f"### Bloco {block_idx + 1}")
 
@@ -715,7 +893,7 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM (sem botões −½ / +½) ----
+                    # ---- Linha BPM / TOM ----
                     bpm_val = item.get("bpm", "")
                     tom_original = item.get("tom_original", "") or item.get("tom", "")
                     tom_val = item.get("tom", tom_original)
@@ -851,7 +1029,47 @@ def render_song_database():
 
 
 # --------------------------------------------------------------------
-# 9. MAIN
+# 9. TELA INICIAL (HOME)
+# --------------------------------------------------------------------
+def render_home():
+    st.title("PDL Setlist")
+
+    setlists = list_setlist_names()
+
+    col_new, col_load = st.columns(2)
+
+    with col_new:
+        st.subheader("Nova setlist")
+        default_name = st.session_state.get("setlist_name", "Pagode do LEC")
+        new_name = st.text_input(
+            "Nome da nova setlist (nome da aba)",
+            value=default_name,
+            key="new_setlist_name",
+        )
+        if st.button("Criar setlist"):
+            st.session_state.setlist_name = new_name.strip() or "Setlist sem nome"
+            st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
+            st.session_state.current_item = None
+            st.session_state.screen = "editor"
+            st.rerun()
+
+    with col_load:
+        st.subheader("Carregar setlist existente")
+        if setlists:
+            selected = st.selectbox(
+                "Escolha a setlist (aba)",
+                options=setlists,
+                key="load_setlist_select",
+            )
+            if st.button("Carregar esta setlist"):
+                load_setlist_into_state(selected, st.session_state.songs_df)
+                st.rerun()
+        else:
+            st.info("Nenhuma aba de setlist encontrada (apenas a primeira é o banco de músicas).")
+
+
+# --------------------------------------------------------------------
+# 10. MAIN
 # --------------------------------------------------------------------
 def main():
     st.set_page_config(
@@ -862,12 +1080,26 @@ def main():
 
     init_state()
 
-    st.markdown(f"### Setlist: {st.session_state.setlist_name}")
-    st.session_state.setlist_name = st.text_input(
-        "Nome do setlist",
-        value=st.session_state.setlist_name,
-        label_visibility="collapsed",
-    )
+    if st.session_state.screen == "home":
+        render_home()
+        return
+
+    # ---------------- EDITOR / PREVIEW -----------------
+    top_left, top_right = st.columns([3, 1])
+    with top_left:
+        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
+        st.session_state.setlist_name = st.text_input(
+            "Nome do setlist (também será o nome da aba)",
+            value=st.session_state.setlist_name,
+            label_visibility="collapsed",
+        )
+    with top_right:
+        if st.button("🏠 Voltar à tela inicial", use_container_width=True):
+            st.session_state.screen = "home"
+            st.rerun()
+        if st.button("💾 Salvar setlist (aba)", use_container_width=True):
+            save_current_setlist_to_sheet()
+            st.success("Setlist salva na aba correspondente do Google Sheets.")
 
     left_col, right_col = st.columns([1.1, 1])
 

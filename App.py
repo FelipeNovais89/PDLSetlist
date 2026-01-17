@@ -4,6 +4,7 @@ import io
 import re
 
 import gspread
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 
 from googleapiclient.discovery import build
@@ -41,12 +42,11 @@ NOTE_TO_INDEX = {
     "B": 11,
 }
 
-# lista de tons (maiores + menores)
 _TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 TONE_OPTIONS = []
 for root in _TONE_BASES:
-    TONE_OPTIONS.append(root)       # maior
-    TONE_OPTIONS.append(root + "m") # menor
+    TONE_OPTIONS.append(root)        # maior
+    TONE_OPTIONS.append(root + "m")  # menor
 
 
 def split_root_and_suffix(symbol: str):
@@ -159,18 +159,22 @@ def strip_chord_markers_for_display(text: str) -> str:
 
 
 # --------------------------------------------------------------------
-# 1. GOOGLE SHEETS – BANCO DE MÚSICAS
+# 1. GOOGLE SHEETS – HELPERS GERAIS
 # --------------------------------------------------------------------
-@st.cache_data(ttl=300)
-def load_songs_df():
+def get_spreadsheet():
+    """Retorna o objeto Spreadsheet (o mesmo usado para banco e setlists)."""
     secrets = st.secrets["gcp_service_account"]
     sheet_id = st.secrets["sheets"]["sheet_id"]
-
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(secrets, scopes=scopes)
     gc = gspread.authorize(creds)
+    return gc.open_by_key(sheet_id)
 
-    sh = gc.open_by_key(sheet_id)
+
+@st.cache_data(ttl=300)
+def load_songs_df():
+    """Aba 1 = banco de músicas."""
+    sh = get_spreadsheet()
     ws = sh.sheet1
 
     records = ws.get_all_records()
@@ -189,16 +193,124 @@ def load_songs_df():
 
 
 def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_id: str):
-    secrets = st.secrets["gcp_service_account"]
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-    gc = gspread.authorize(creds)
-
-    sh = gc.open_by_key(sheet_id)
+    sh = get_spreadsheet()
     ws = sh.sheet1
     ws.append_row([title, artist, tom_original, bpm or "", cifra_id or ""])
+
+
+# --------- SETLISTS EM ABAS SEPARADAS --------------------------------
+def list_setlist_tabs():
+    """Lista títulos das abas de setlist (todas menos a 1ª)."""
+    sh = get_spreadsheet()
+    worksheets = sh.worksheets()
+    if len(worksheets) <= 1:
+        return []
+    return [ws.title for ws in worksheets[1:]]
+
+
+def save_setlist_to_tab(tab_title: str, blocks):
+    """Salva a estrutura de blocos numa aba específica."""
+    sh = get_spreadsheet()
+    try:
+        ws = sh.worksheet(tab_title)
+    except WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_title, rows=500, cols=9)
+
+    ws.clear()
+    headers = [
+        "Bloco",
+        "Tipo",
+        "Título",
+        "Artista",
+        "Tom_Original",
+        "Tom",
+        "BPM",
+        "CifraDriveID",
+        "Label",
+    ]
+    ws.append_row(headers)
+
+    rows = []
+    for block in blocks:
+        block_name = block["name"]
+        for item in block["items"]:
+            if item["type"] == "music":
+                rows.append(
+                    [
+                        block_name,
+                        "music",
+                        item.get("title", ""),
+                        item.get("artist", ""),
+                        item.get("tom_original", ""),
+                        item.get("tom", ""),
+                        item.get("bpm", ""),
+                        item.get("cifra_id", ""),
+                        "",
+                    ]
+                )
+            else:
+                rows.append(
+                    [
+                        block_name,
+                        "pause",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        item.get("label", "Pausa"),
+                    ]
+                )
+
+    if rows:
+        ws.append_rows(rows, value_input_option="RAW")
+
+
+def load_setlist_from_tab(tab_title: str):
+    """Lê uma aba de setlist e reconstrói a estrutura de blocos."""
+    sh = get_spreadsheet()
+    try:
+        ws = sh.worksheet(tab_title)
+    except WorksheetNotFound:
+        return []
+
+    records = ws.get_all_records()
+    if not records:
+        return []
+
+    blocks = []
+    block_index = {}
+
+    for rec in records:
+        block_name = rec.get("Bloco", "") or "Bloco 1"
+        if block_name not in block_index:
+            blocks.append({"name": block_name, "items": []})
+            block_index[block_name] = len(blocks) - 1
+
+        blk = blocks[block_index[block_name]]
+        tipo = (rec.get("Tipo", "") or "").lower()
+
+        if tipo == "music":
+            item = {
+                "type": "music",
+                "title": rec.get("Título", ""),
+                "artist": rec.get("Artista", ""),
+                "tom_original": rec.get("Tom_Original", ""),
+                "tom": rec.get("Tom", "") or rec.get("Tom_Original", ""),
+                "bpm": rec.get("BPM", ""),
+                "cifra_id": str(rec.get("CifraDriveID", "")).strip(),
+                "text": "",
+            }
+        else:
+            item = {
+                "type": "pause",
+                "label": rec.get("Label", "Pausa"),
+            }
+
+        blk["items"].append(item)
+
+    return blocks
 
 
 # --------------------------------------------------------------------
@@ -269,9 +381,7 @@ def init_state():
         st.session_state.songs_df = load_songs_df()
 
     if "blocks" not in st.session_state:
-        st.session_state.blocks = [
-            {"name": "Bloco 1", "items": []}
-        ]
+        st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
 
     if "current_item" not in st.session_state:
         st.session_state.current_item = None
@@ -285,9 +395,12 @@ def init_state():
     if "preview_index" not in st.session_state:
         st.session_state.preview_index = 0
 
+    if "current_setlist_tab" not in st.session_state:
+        st.session_state.current_setlist_tab = None
+
 
 # --------------------------------------------------------------------
-# 4. HELPERS
+# 4. HELPERS DE BLOCO
 # --------------------------------------------------------------------
 def move_item(block_idx, item_idx, direction):
     items = st.session_state.blocks[block_idx]["items"]
@@ -335,16 +448,6 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 def build_pages_structure(blocks):
-    """
-    Retorna uma lista de páginas na ordem do setlist.
-    Cada item é:
-    {
-        "item": item_dict,
-        "block_name": str,
-        "footer_mode": str,
-        "footer_next_item": dict|None
-    }
-    """
     pages = []
     for b_idx, block in enumerate(blocks):
         for i_idx, item in enumerate(block["items"]):
@@ -435,11 +538,6 @@ def build_footer_end_of_block():
 
 
 def _compute_body_and_header_fields(item, block_name):
-    """
-    Reaproveitado tanto para HTML quanto para PDF.
-    Retorna (title, artist, tom, bpm, body_final, footer_info_dict)
-    footer_info_dict é só para o PDF, preenchido depois.
-    """
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
         artist = block_name
@@ -663,14 +761,12 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 def build_page_text_for_pdf(item, block_name, footer_mode, footer_next_item):
-    """Gera um texto simples (monoespaçado) para cada página do PDF."""
     title, artist, tom, bpm, body_final = _compute_body_and_header_fields(
         item, block_name
     )
 
     lines = []
 
-    # Cabeçalho simples
     lines.append(block_name)
     lines.append("")
     lines.append(title or "NOVA MÚSICA")
@@ -683,7 +779,6 @@ def build_page_text_for_pdf(item, block_name, footer_mode, footer_next_item):
     lines.extend(body_final.splitlines())
     lines.append("")
 
-    # Rodapé simples
     if footer_mode == "next_music" and footer_next_item is not None:
         nt = footer_next_item.get("title", "")
         na = footer_next_item.get("artist", "")
@@ -692,7 +787,7 @@ def build_page_text_for_pdf(item, block_name, footer_mode, footer_next_item):
         footer_line = f"PRÓXIMA: {nt} ({na}) | TOM {nn} | BPM {nb}"
         lines.append(footer_line)
     elif footer_mode == "next_pause" and footer_next_item is not None:
-        lbl = footer_next_item.get("label", "Pausa")
+        lbl = footer_next_item.get("Label", "") or footer_next_item.get("label", "Pausa")
         lines.append(f"PRÓXIMA: PAUSA – {lbl}")
     elif footer_mode == "end_block":
         lines.append("FIM DE BLOCO")
@@ -701,10 +796,6 @@ def build_page_text_for_pdf(item, block_name, footer_mode, footer_next_item):
 
 
 def export_pdf(pages_text_list):
-    """
-    Cria um PDF em memória com uma página por item de pages_text_list.
-    Cada elemento é uma string com quebras de linha.
-    """
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -763,7 +854,6 @@ def render_block_editor(block, block_idx, songs_df):
         with container:
             left, right = st.columns([8, 2])
 
-            # ---------------- COLUNA ESQUERDA ------------------------
             with left:
                 if item["type"] == "music":
                     title = item.get("title", "Nova música")
@@ -773,7 +863,6 @@ def render_block_editor(block, block_idx, songs_df):
                         label += f" – {artist}"
                     st.markdown(f"**{label}**")
 
-                    # Ver / editar cifra
                     cifra_id = item.get("cifra_id", "")
                     with st.expander("Ver cifra"):
                         if cifra_id:
@@ -827,12 +916,10 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM ----
                     bpm_val = item.get("bpm", "")
                     tom_original = item.get("tom_original", "") or item.get("tom", "")
                     tom_val = item.get("tom", tom_original)
 
-                    # labels centralizados e menores
                     lab_bpm, _, lab_tom, _ = st.columns([1.5, 0.7, 1.4, 0.7])
                     lab_bpm.markdown(
                         "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
@@ -843,9 +930,7 @@ def render_block_editor(block, block_idx, songs_df):
                         unsafe_allow_html=True,
                     )
 
-                    col_bpm, col_minus, col_tom, col_plus = st.columns(
-                        [1.5, 0.7, 1.4, 0.7]
-                    )
+                    col_bpm, _, col_tom, _ = st.columns([1.5, 0.7, 1.4, 0.7])
 
                     new_bpm = col_bpm.text_input(
                         "BPM",
@@ -856,7 +941,6 @@ def render_block_editor(block, block_idx, songs_df):
                     )
                     item["bpm"] = new_bpm
 
-                    # lista de tons: só maiores ou só menores
                     if tom_original.endswith("m"):
                         tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
                     else:
@@ -885,7 +969,6 @@ def render_block_editor(block, block_idx, songs_df):
                     label = f"⏸ PAUSA – {item.get('label','')}"
                     st.markdown(f"**{label}**")
 
-            # ---------------- COLUNA DIREITA --------------------------
             with right:
                 if st.button("⬆️", key=f"item_up_{block_idx}_{i}"):
                     move_item(block_idx, i, -1)
@@ -897,8 +980,6 @@ def render_block_editor(block, block_idx, songs_df):
                     delete_item(block_idx, i)
                     st.rerun()
                 if st.button("Prev", key=f"preview_{block_idx}_{i}"):
-                    # seta o preview para esta página específica
-                    # precisamos descobrir o índice global dela
                     global_index = 0
                     for b_i, blk in enumerate(st.session_state.blocks):
                         for it in blk["items"]:
@@ -909,7 +990,6 @@ def render_block_editor(block, block_idx, songs_df):
 
         st.markdown("---")
 
-    # adicionar músicas / pausa
     add_col1, add_col2 = st.columns(2)
     if add_col1.button("+ Música", key=f"add_music_btn_{block_idx}"):
         st.session_state[f"show_add_music_{block_idx}"] = True
@@ -984,6 +1064,43 @@ def main():
 
     init_state()
 
+    # ------------------ CONTROLE DAS SETLISTS ------------------------
+    st.markdown("#### Setlists salvas no Google Sheets")
+
+    col_new, col_load = st.columns(2)
+
+    with col_new:
+        new_name = st.text_input("Nova setlist", key="new_setlist_name")
+        if st.button("Criar nova setlist"):
+            name = new_name.strip() or "Nova Setlist"
+            st.session_state.setlist_name = name
+            st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
+            st.session_state.current_setlist_tab = name
+            save_setlist_to_tab(name, st.session_state.blocks)
+            st.success(f"Setlist '{name}' criada.")
+            st.rerun()
+
+    with col_load:
+        existing_tabs = list_setlist_tabs()
+        options = ["(Nenhuma)"] + existing_tabs
+        selected_tab = st.selectbox(
+            "Carregar setlist existente",
+            options=options,
+            index=0,
+            key="load_setlist_select",
+        )
+        if st.button("Carregar setlist"):
+            if selected_tab != "(Nenhuma)":
+                blocks = load_setlist_from_tab(selected_tab)
+                st.session_state.blocks = blocks if blocks else [{"name": "Bloco 1", "items": []}]
+                st.session_state.setlist_name = selected_tab
+                st.session_state.current_setlist_tab = selected_tab
+                st.session_state.preview_index = 0
+                st.success(f"Setlist '{selected_tab}' carregada.")
+                st.rerun()
+            else:
+                st.info("Selecione uma setlist na lista.")
+
     st.markdown(f"### Setlist: {st.session_state.setlist_name}")
     st.session_state.setlist_name = st.text_input(
         "Nome do setlist",
@@ -1006,6 +1123,18 @@ def main():
 
         render_song_database()
 
+        st.markdown("---")
+        if st.session_state.current_setlist_tab:
+            if st.button("Salvar setlist no Google Sheets", use_container_width=True):
+                save_setlist_to_tab(
+                    st.session_state.current_setlist_tab, st.session_state.blocks
+                )
+                st.success(
+                    f"Setlist salva na aba '{st.session_state.current_setlist_tab}'."
+                )
+        else:
+            st.info("Crie ou carregue uma setlist para poder salvar.")
+
     with right_col:
         st.subheader("Preview")
 
@@ -1015,7 +1144,6 @@ def main():
         if not pages:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            # garante que o índice está dentro do range
             if st.session_state.preview_index >= len(pages):
                 st.session_state.preview_index = 0
 
@@ -1033,16 +1161,13 @@ def main():
             )
             st.components.v1.html(html, height=1200, scrolling=True)
 
-            # ----------------- CONTROLES ⬅️ ➡️ | Export PDF -----------------
             col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 3, 2])
 
-            # botão anterior
             if col2.button("⬅️", disabled=st.session_state.preview_index == 0):
                 if st.session_state.preview_index > 0:
                     st.session_state.preview_index -= 1
                     st.rerun()
 
-            # botão próximo
             if col3.button(
                 "➡️", disabled=st.session_state.preview_index == len(pages) - 1
             ):
@@ -1050,10 +1175,12 @@ def main():
                     st.session_state.preview_index += 1
                     st.rerun()
 
-            # botão Export PDF (todas as páginas)
             pages_text = [
                 build_page_text_for_pdf(
-                    p["item"], p["block_name"], p["footer_mode"], p["footer_next_item"]
+                    p["item"],
+                    p["block_name"],
+                    p["footer_mode"],
+                    p["footer_next_item"],
                 )
                 for p in pages
             ]

@@ -36,6 +36,13 @@ NOTE_TO_INDEX = {
     "B": 11,
 }
 
+# lista de tons para o select (maiores e menores)
+_TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+TONE_OPTIONS = []
+for root in _TONE_BASES:
+    TONE_OPTIONS.append(root)
+    TONE_OPTIONS.append(root + "m")
+
 
 def split_root_and_suffix(symbol: str):
     """
@@ -81,13 +88,11 @@ def transpose_root(root: str, steps: int) -> str:
     if idx is None:
         return root
 
-    # mantém linguagem: se era bemol, usa escala com b; se era sustenido, usa #
     if "b" in root:
         scale = NOTE_SEQ_FLAT
     elif "#" in root:
         scale = NOTE_SEQ_SHARP
     else:
-        # padrão: sustenido
         scale = NOTE_SEQ_SHARP
 
     return scale[(idx + steps) % 12]
@@ -118,7 +123,6 @@ def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
 
     for line in lines:
         if not line.startswith("|"):
-            # não é linha de cifra -> mantém
             new_lines.append(line)
             continue
 
@@ -129,7 +133,6 @@ def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
             root = match.group(1)
             return transpose_root(root, steps)
 
-        # Acordes: raiz A–G com opcional # ou b
         transposed = re.sub(r"([A-G](?:#|b)?)", repl, text)
         new_lines.append(marker + transposed)
 
@@ -139,7 +142,6 @@ def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
 def normalize_lyrics_indent(text: str) -> str:
     """
     Remove APENAS 1 espaço do começo das linhas que NÃO são de cifra (sem '|').
-    Assim você ainda pode usar mais espaços para marcar refrão/estrofe.
     """
     lines = text.splitlines()
     out = []
@@ -335,12 +337,6 @@ def delete_block(block_idx):
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     """
     Decide o que mostrar no rodapé da página atual.
-
-    Retorna (mode, next_item):
-    - "next_music"  -> próxima música no MESMO bloco
-    - "next_pause"  -> próxima é pausa no MESMO bloco
-    - "end_block"   -> acabou bloco mas tem próximo bloco
-    - "none"        -> acabou tudo
     """
     items = blocks[cur_block_idx]["items"]
 
@@ -459,7 +455,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             )
         tom_atual = tom
 
-    # Transposição + alinhamento (somente se for música)
+    # Transposição + alinhamento
     if item["type"] == "pause":
         body_final = raw_body
     else:
@@ -491,7 +487,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         </div>
     """
 
-    # HTML completo (preview)
     return f"""
     <html>
     <head>
@@ -683,128 +678,153 @@ def render_block_editor(block, block_idx, songs_df):
     st.markdown("---")
 
     for i, item in enumerate(block["items"]):
-        row = st.container()
-        with row:
-            c1, c2, c3, c4, c5 = st.columns([5, 1.5, 1.5, 1, 1])
+        container = st.container()
+        with container:
+            left, right = st.columns([8, 2])
 
-            if item["type"] == "music":
-                title = item.get("title", "Nova música")
-                artist = item.get("artist", "")
-                label = f"🎵 {title}"
-                if artist:
-                    label += f" – {artist}"
-                c1.markdown(label)
+            # --------------------------------------------------------
+            # COLUNA ESQUERDA: música, cifra, BPM/Tom
+            # --------------------------------------------------------
+            with left:
+                if item["type"] == "music":
+                    title = item.get("title", "Nova música")
+                    artist = item.get("artist", "")
+                    label = f"🎵 {title}"
+                    if artist:
+                        label += f" – {artist}"
+                    st.markdown(f"**{label}**")
 
-                bpm_val = item.get("bpm", "")
-                placeholder = "BPM" if bpm_val in ("", None, 0) else str(bpm_val)
-                new_bpm = c2.text_input(
-                    "BPM",
-                    value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
-                    key=f"bpm_{block_idx}_{i}",
-                    placeholder=placeholder,
-                    label_visibility="collapsed",
-                )
-                item["bpm"] = new_bpm
+                    # --- Ver / editar cifra ---
+                    cifra_id = item.get("cifra_id", "")
+                    with st.expander("Ver cifra"):
+                        if cifra_id:
+                            cifra_text = load_chord_from_drive(cifra_id)
+                        else:
+                            cifra_text = item.get("text", "")
 
-                # ----- CONTROLE DE TOM: [-½] [Tom] [+½] -----
-                tom_original = item.get("tom_original", "") or item.get("tom", "")
-                tom_val = item.get("tom", tom_original)
+                        font_size = st.session_state.cifra_font_size
 
-                col_minus, col_label, col_plus = c3.columns([1, 2, 1])
+                        col_font_minus, col_font_plus = st.columns(2)
+                        if col_font_minus.button(
+                            "A﹣", key=f"font_minus_{block_idx}_{i}"
+                        ):
+                            st.session_state.cifra_font_size = max(8, font_size - 1)
+                            st.rerun()
+                        if col_font_plus.button(
+                            "A﹢", key=f"font_plus_{block_idx}_{i}"
+                        ):
+                            st.session_state.cifra_font_size = min(24, font_size + 1)
+                            st.rerun()
 
-                if col_minus.button("−½", key=f"tom_minus_{block_idx}_{i}"):
-                    base_key = item.get("tom", tom_original) or tom_original
-                    item["tom"] = transpose_key_by_semitones(base_key, -1)
-                    st.rerun()
+                        edit_key = f"cifra_edit_{block_idx}_{i}"
+                        edited = st.text_area(
+                            "Cifra",
+                            value=cifra_text,
+                            height=300,
+                            key=edit_key,
+                            label_visibility="collapsed",
+                        )
 
-                col_label.markdown(
-                    f"<div style='text-align:center; font-size:12px;'><strong>{tom_val or '-'}</strong></div>",
-                    unsafe_allow_html=True,
-                )
+                        st.markdown(
+                            f"""
+                            <style>
+                            textarea[data-testid="stTextArea"] {{
+                                font-family: 'Courier New', monospace;
+                                font-size: {font_size}px;
+                            }}
+                            </style>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
-                if col_plus.button("+½", key=f"tom_plus_{block_idx}_{i}"):
-                    base_key = item.get("tom", tom_original) or tom_original
-                    item["tom"] = transpose_key_by_semitones(base_key, +1)
-                    st.rerun()
+                        if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
+                            if cifra_id:
+                                save_chord_to_drive(cifra_id, edited)
+                                st.success("Cifra atualizada no Drive.")
+                            else:
+                                item["text"] = edited
+                                st.success(
+                                    "Cifra salva apenas neste setlist (sem arquivo no Drive)."
+                                )
+                            st.rerun()
 
-                # ----- CIFRA (ver/editar) -----
-                cifra_id = item.get("cifra_id", "")
-                with c1.expander("Ver cifra"):
-                    if cifra_id:
-                        cifra_text = load_chord_from_drive(cifra_id)
+                    # --- Linha BPM / TOM ---
+                    bpm_val = item.get("bpm", "")
+                    tom_original = item.get("tom_original", "") or item.get("tom", "")
+                    tom_val = item.get("tom", tom_original)
+
+                    # labels
+                    lab_bpm, _, lab_tom, _ = st.columns([1.5, 0.7, 1.4, 0.7])
+                    lab_bpm.markdown("**BPM**")
+                    lab_tom.markdown("**Tom**")
+
+                    # inputs
+                    col_bpm, col_minus, col_tom, col_plus = st.columns(
+                        [1.5, 0.7, 1.4, 0.7]
+                    )
+
+                    new_bpm = col_bpm.text_input(
+                        "BPM",
+                        value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
+                        key=f"bpm_{block_idx}_{i}",
+                        label_visibility="collapsed",
+                        placeholder="BPM",
+                    )
+                    item["bpm"] = new_bpm
+
+                    # -½
+                    if col_minus.button("−½", key=f"tom_minus_{block_idx}_{i}"):
+                        base_key = item.get("tom", tom_original) or tom_original
+                        item["tom"] = transpose_key_by_semitones(base_key, -1)
+                        st.rerun()
+
+                    # select de Tom
+                    if tom_val in TONE_OPTIONS:
+                        idx_tone = TONE_OPTIONS.index(tom_val)
                     else:
-                        cifra_text = item.get("text", "")
-
-                    font_size = st.session_state.cifra_font_size
-
-                    col_font_minus, col_font_plus = st.columns(2)
-                    if col_font_minus.button(
-                        "A﹣", key=f"font_minus_{block_idx}_{i}"
-                    ):
-                        st.session_state.cifra_font_size = max(8, font_size - 1)
-                        st.rerun()
-                    if col_font_plus.button(
-                        "A﹢", key=f"font_plus_{block_idx}_{i}"
-                    ):
-                        st.session_state.cifra_font_size = min(24, font_size + 1)
-                        st.rerun()
-
-                    edit_key = f"cifra_edit_{block_idx}_{i}"
-                    edited = st.text_area(
-                        "Cifra",
-                        value=cifra_text,
-                        height=300,
-                        key=edit_key,
+                        idx_tone = 0
+                    selected_tone = col_tom.selectbox(
+                        "Tom",
+                        options=TONE_OPTIONS,
+                        index=idx_tone,
+                        key=f"tom_select_{block_idx}_{i}",
                         label_visibility="collapsed",
                     )
-
-                    # CSS global para textareas -> Courier New
-                    st.markdown(
-                        f"""
-                        <style>
-                        textarea[data-testid="stTextArea"] {{
-                            font-family: 'Courier New', monospace;
-                            font-size: {font_size}px;
-                        }}
-                        </style>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
-                        if cifra_id:
-                            save_chord_to_drive(cifra_id, edited)
-                            st.success("Cifra atualizada no Drive.")
-                        else:
-                            item["text"] = edited
-                            st.success(
-                                "Cifra salva apenas neste setlist (sem arquivo no Drive)."
-                            )
+                    if selected_tone != tom_val:
+                        item["tom"] = selected_tone
                         st.rerun()
 
-            else:
-                label = f"⏸ PAUSA – {item.get('label','')}"
-                c1.markdown(label)
-                c2.write("")
-                c3.write("")
+                    # +½
+                    if col_plus.button("+½", key=f"tom_plus_{block_idx}_{i}"):
+                        base_key = item.get("tom", tom_original) or tom_original
+                        item["tom"] = transpose_key_by_semitones(base_key, +1)
+                        st.rerun()
 
-            col_up, col_down, col_del = c4, c5, st.columns(1)[0]
-            if col_up.button("↑", key=f"item_up_{block_idx}_{i}"):
-                move_item(block_idx, i, -1)
-                st.rerun()
-            if col_down.button("↓", key=f"item_down_{block_idx}_{i}"):
-                move_item(block_idx, i, 1)
-                st.rerun()
-            if col_del.button("✕", key=f"item_del_{block_idx}_{i}"):
-                delete_item(block_idx, i)
-                st.rerun()
+                else:
+                    # PAUSA
+                    label = f"⏸ PAUSA – {item.get('label','')}"
+                    st.markdown(f"**{label}**")
 
-            if st.button("Preview", key=f"preview_{block_idx}_{i}"):
-                st.session_state.current_item = (block_idx, i)
-                st.rerun()
+            # --------------------------------------------------------
+            # COLUNA DIREITA: controles (up/down/delete/preview)
+            # --------------------------------------------------------
+            with right:
+                if st.button("⬆️", key=f"item_up_{block_idx}_{i}"):
+                    move_item(block_idx, i, -1)
+                    st.rerun()
+                if st.button("⬇️", key=f"item_down_{block_idx}_{i}"):
+                    move_item(block_idx, i, 1)
+                    st.rerun()
+                if st.button("❌", key=f"item_del_{block_idx}_{i}"):
+                    delete_item(block_idx, i)
+                    st.rerun()
+                if st.button("Preview", key=f"preview_{block_idx}_{i}"):
+                    st.session_state.current_item = (block_idx, i)
+                    st.rerun()
 
-    st.markdown("")
+        st.markdown("---")
 
+    # Adicionar músicas / pausa
     add_col1, add_col2 = st.columns(2)
     if add_col1.button("+ Música", key=f"add_music_btn_{block_idx}"):
         st.session_state[f"show_add_music_{block_idx}"] = True
@@ -900,7 +920,6 @@ def main():
             block_container = st.container()
             with block_container:
                 render_block_editor(block, idx, st.session_state.songs_df)
-                st.markdown("---")
 
         render_song_database()
 

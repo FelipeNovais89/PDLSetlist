@@ -10,6 +10,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
+from xhtml2pdf import pisa  # <--- para gerar PDF
+
+
 # --------------------------------------------------------------------
 # 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
 # --------------------------------------------------------------------
@@ -36,12 +39,11 @@ NOTE_TO_INDEX = {
     "B": 11,
 }
 
-# lista de tons (maiores + menores)
 _TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 TONE_OPTIONS = []
 for root in _TONE_BASES:
-    TONE_OPTIONS.append(root)        # maior
-    TONE_OPTIONS.append(root + "m")  # menor
+    TONE_OPTIONS.append(root)
+    TONE_OPTIONS.append(root + "m")
 
 
 def split_root_and_suffix(symbol: str):
@@ -154,6 +156,161 @@ def strip_chord_markers_for_display(text: str) -> str:
 
 
 # --------------------------------------------------------------------
+# CSS COMUM PARA PREVIEW E PDF
+# --------------------------------------------------------------------
+def get_common_css():
+    return """
+    body {
+        margin: 0;
+        padding: 16px;
+        background: #111;
+    }
+    .sheet {
+        width: 800px;
+        height: 1130px;
+        background: white;
+        padding: 40px 40px 60px 40px;
+        box-sizing: border-box;
+        font-family: "Courier New", monospace;
+        margin: 0 auto;
+        page-break-after: always;
+    }
+
+    .sheet-header {
+        display: grid;
+        grid-template-columns: 2fr 1fr 0.25fr;
+        align-items: center;
+        padding: 4px 4px 8px;
+        border-bottom: 1px solid #ccc;
+        font-size: 10px;
+    }
+    .sheet-header-col {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .sheet-header-main .sheet-title {
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 8px;
+    }
+    .sheet-header-main .sheet-artist {
+        font-weight: 400;
+        font-size: 6px;
+    }
+    .sheet-label {
+        font-weight: 700;
+        text-align: center;
+        font-size: 8px;
+    }
+    .sheet-value {
+        text-align: center;
+        font-weight: 400;
+        font-size: 6px;
+    }
+
+    .sheet-body {
+        padding: 12px 8px 12px 8px;
+        min-height: 420px;
+    }
+    .sheet-body-text {
+        white-space: pre-wrap;
+        font-family: "Courier New", monospace;
+        font-size: 10px;
+        line-height: 1.3;
+    }
+
+    .sheet-footer {
+        font-size: 8px;
+        margin-top: auto;
+        padding-top: 4px;
+        border-top: 1px solid #ccc;
+    }
+
+    .sheet-footer-grid {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sheet-next-label {
+        font-weight: 700;
+        margin-bottom: 2px;
+        text-align: left;
+    }
+
+    .sheet-next-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .sheet-next-title {
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .sheet-next-tombpm-header {
+        display: grid;
+        grid-template-columns: 1fr 0.25fr;
+        column-gap: 4pt;
+        min-width: 70px;
+        margin-right: 16px;
+        text-align: center;
+    }
+
+    .sheet-next-tom-header,
+    .sheet-next-bpm-header {
+        font-weight: 700;
+    }
+
+    .sheet-next-values-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .sheet-next-tombpm-values {
+        display: grid;
+        grid-template-columns: 1fr 0.25fr;
+        column-gap: 4pt;
+        min-width: 70px;
+        margin-right: 16px;
+        text-align: center;
+    }
+
+    .sheet-footer-center {
+        padding-top: 6px;
+    }
+
+    .sheet-next-pause-wrapper {
+        display: flex;
+        justify-content: center;
+        margin-top: 4px;
+    }
+
+    .sheet-next-pause {
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .sheet-footer-endblock {
+        padding-top: 6px;
+    }
+
+    .sheet-endblock-wrapper {
+        display: flex;
+        justify-content: center;
+        margin-top: 4px;
+    }
+
+    .sheet-endblock-text {
+        font-size: 12px;
+        font-weight: 700;
+    }
+    """
+
+
+# --------------------------------------------------------------------
 # 1. GOOGLE SHEETS – CLIENTE E BANCO DE MÚSICAS (ABA 1)
 # --------------------------------------------------------------------
 def get_gspread_client():
@@ -173,7 +330,7 @@ def get_spreadsheet():
 @st.cache_data(ttl=300)
 def load_songs_df():
     sh = get_spreadsheet()
-    ws = sh.sheet1  # primeira aba = banco de músicas
+    ws = sh.sheet1
 
     records = ws.get_all_records()
     if not records:
@@ -215,42 +372,29 @@ SETLIST_COLS = [
 
 
 def list_setlist_names():
-    """
-    Retorna a lista de nomes de abas que serão tratadas como setlists.
-    Convenção:
-      - sheet1 = banco de músicas
-      - todas as outras abas = setlists
-    """
     sh = get_spreadsheet()
     worksheets = sh.worksheets()
-    # primeira aba é o banco de músicas
-    setlists = [ws.title for ws in worksheets[1:]]
-    return setlists
+    return [ws.title for ws in worksheets[1:]]  # primeira aba é banco de músicas
 
 
 def get_or_create_setlist_ws(name: str):
-    """Abre (ou cria) a worksheet com esse nome para a setlist."""
     sh = get_spreadsheet()
     name = (name or "").strip() or "Setlist sem nome"
 
-    # tenta abrir
     for ws in sh.worksheets():
         if ws.title == name:
             return ws
 
-    # se não existe, cria
     ws = sh.add_worksheet(title=name, rows=1000, cols=len(SETLIST_COLS))
     ws.append_row(SETLIST_COLS)
     return ws
 
 
 def load_setlist_df(name: str) -> pd.DataFrame:
-    """Lê a aba da setlist (pelo nome) em um DataFrame."""
     sh = get_spreadsheet()
     try:
         ws = sh.worksheet(name)
     except gspread.WorksheetNotFound:
-        # se não existir, retorna DF vazio
         df = pd.DataFrame(columns=SETLIST_COLS)
         return df
 
@@ -268,7 +412,6 @@ def load_setlist_df(name: str) -> pd.DataFrame:
 
 
 def write_setlist_df(name: str, df: pd.DataFrame):
-    """Sobrescreve a aba da setlist (pelo nome) com o DF fornecido."""
     ws = get_or_create_setlist_ws(name)
     ws.clear()
     ws.append_row(SETLIST_COLS)
@@ -277,9 +420,7 @@ def write_setlist_df(name: str, df: pd.DataFrame):
 
 
 def save_current_setlist_to_sheet():
-    """Pega blocks do session_state e grava na aba da setlist (uma aba por setlist)."""
     name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
-
     blocks = st.session_state.blocks
     rows = []
     for b_idx, block in enumerate(blocks):
@@ -306,7 +447,6 @@ def save_current_setlist_to_sheet():
                 base["CifraDriveID"] = item.get("cifra_id", "")
             else:
                 base["PauseLabel"] = item.get("label", "Pausa")
-
             rows.append(base)
 
     df_new = pd.DataFrame(rows, columns=SETLIST_COLS)
@@ -314,7 +454,6 @@ def save_current_setlist_to_sheet():
 
 
 def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
-    """Lê a aba (setlist_name) e monta blocks em session_state."""
     df_sel = load_setlist_df(setlist_name)
     if df_sel.empty:
         return
@@ -390,7 +529,6 @@ def get_drive_service():
 def load_chord_from_drive(file_id: str) -> str:
     if not file_id:
         return ""
-
     file_id = str(file_id).strip()
 
     try:
@@ -416,7 +554,6 @@ def load_chord_from_drive(file_id: str) -> str:
 def save_chord_to_drive(file_id: str, content: str):
     if not file_id:
         return
-
     file_id = str(file_id).strip()
 
     try:
@@ -449,7 +586,7 @@ def init_state():
         ]
 
     if "current_item" not in st.session_state:
-        st.session_state.current_item = None
+        st.session_state.current_item = None  # (block_idx, item_idx)
 
     if "setlist_name" not in st.session_state:
         st.session_state.setlist_name = "Pagode do LEC"
@@ -458,15 +595,14 @@ def init_state():
         st.session_state.cifra_font_size = 14
 
     if "screen" not in st.session_state:
-        st.session_state.screen = "home"  # tela inicial
+        st.session_state.screen = "home"
 
 
 # --------------------------------------------------------------------
-# 5. RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
+# 5. RODAPÉ / NAVEGAÇÃO
 # --------------------------------------------------------------------
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     items = blocks[cur_block_idx]["items"]
-
     if cur_item_idx + 1 < len(items):
         nxt = items[cur_item_idx + 1]
         if nxt["type"] == "pause":
@@ -479,6 +615,14 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
             return "end_block", None
 
     return "none", None
+
+
+def flatten_blocks(blocks):
+    flat = []
+    for b_idx, block in enumerate(blocks):
+        for i_idx, _ in enumerate(block.get("items", [])):
+            flat.append((b_idx, i_idx))
+    return flat
 
 
 # --------------------------------------------------------------------
@@ -555,7 +699,7 @@ def build_footer_end_of_block():
     """
 
 
-def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
+def build_sheet_page_inner(item, footer_mode, footer_next_item, block_name):
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
         artist = block_name
@@ -592,9 +736,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         next_artist = footer_next_item.get("artist", "")
         next_tone = footer_next_item.get("tom", "")
         next_bpm = footer_next_item.get("bpm", "")
-        footer_html = build_footer_next_music(
-            next_title, next_artist, next_tone, next_bpm
-        )
+        footer_html = build_footer_next_music(next_title, next_artist, next_tone, next_bpm)
     elif footer_mode == "next_pause" and footer_next_item is not None:
         label = footer_next_item.get("label", "Pausa")
         footer_html = build_footer_next_pause(label)
@@ -610,166 +752,62 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     """
 
     return f"""
+    <div class="sheet">
+      {header_html}
+      {body_html}
+      {footer_html}
+    </div>
+    """
+
+
+def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
+    inner = build_sheet_page_inner(item, footer_mode, footer_next_item, block_name)
+    css = get_common_css()
+    return f"""
     <html>
     <head>
       <style>
-        body {{
-            margin: 0;
-            padding: 16px;
-            background: #111;
-        }}
-        .sheet {{
-            width: 800px;
-            height: 1130px;
-            background: white;
-            padding: 40px 40px 60px 40px;
-            box-sizing: border-box;
-            font-family: "Courier New", monospace;
-            margin: 0 auto;
-        }}
-
-        .sheet-header {{
-            display: grid;
-            grid-template-columns: 2fr 1fr 0.25fr;
-            align-items: center;
-            padding: 4px 4px 8px;
-            border-bottom: 1px solid #ccc;
-            font-size: 10px;
-        }}
-        .sheet-header-col {{
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }}
-        .sheet-header-main .sheet-title {{
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 8px;
-        }}
-        .sheet-header-main .sheet-artist {{
-            font-weight: 400;
-            font-size: 6px;
-        }}
-        .sheet-label {{
-            font-weight: 700;
-            text-align: center;
-            font-size: 8px;
-        }}
-        .sheet-value {{
-            text-align: center;
-            font-weight: 400;
-            font-size: 6px;
-        }}
-
-        .sheet-body {{
-            padding: 12px 8px 12px 8px;
-            min-height: 420px;
-        }}
-        .sheet-body-text {{
-            white-space: pre-wrap;
-            font-family: "Courier New", monospace;
-            font-size: 10px;
-            line-height: 1.3;
-        }}
-
-        .sheet-footer {{
-            font-size: 8px;
-            margin-top: auto;
-            padding-top: 4px;
-            border-top: 1px solid #ccc;
-        }}
-
-        .sheet-footer-grid {{
-            display: flex;
-            flex-direction: column;
-        }}
-
-        .sheet-next-label {{
-            font-weight: 700;
-            margin-bottom: 2px;
-            text-align: left;
-        }}
-
-        .sheet-next-header-row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-        }}
-
-        .sheet-next-title {{
-            font-weight: 700;
-            text-transform: uppercase;
-        }}
-
-        .sheet-next-tombpm-header {{
-            display: grid;
-            grid-template-columns: 1fr 0.25fr;
-            column-gap: 4pt;
-            min-width: 70px;
-            margin-right: 16px;
-            text-align: center;
-        }}
-
-        .sheet-next-tom-header,
-        .sheet-next-bpm-header {{
-            font-weight: 700;
-        }}
-
-        .sheet-next-values-row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-        }}
-
-        .sheet-next-tombpm-values {{
-            display: grid;
-            grid-template-columns: 1fr 0.25fr;
-            column-gap: 4pt;
-            min-width: 70px;
-            margin-right: 16px;
-            text-align: center;
-        }}
-
-        .sheet-footer-center {{
-            padding-top: 6px;
-        }}
-
-        .sheet-next-pause-wrapper {{
-            display: flex;
-            justify-content: center;
-            margin-top: 4px;
-        }}
-
-        .sheet-next-pause {{
-            font-size: 12px;
-            font-weight: 700;
-        }}
-
-        .sheet-footer-endblock {{
-            padding-top: 6px;
-        }}
-
-        .sheet-endblock-wrapper {{
-            display: flex;
-            justify-content: center;
-            margin-top: 4px;
-        }}
-
-        .sheet-endblock-text {{
-            font-size: 12px;
-            font-weight: 700;
-        }}
+      {css}
       </style>
     </head>
     <body>
-      <div class="sheet">
-        {header_html}
-        {body_html}
-        {footer_html}
-      </div>
+      {inner}
     </body>
     </html>
     """
+
+
+def build_full_setlist_html(blocks):
+    css = get_common_css()
+    flat = flatten_blocks(blocks)
+    if not flat:
+        body = "<p>Setlist vazia</p>"
+    else:
+        pages = []
+        for (b_idx, i_idx) in flat:
+            item = blocks[b_idx]["items"][i_idx]
+            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+            pages.append(build_sheet_page_inner(item, footer_mode, footer_next_item, blocks[b_idx]["name"]))
+        body = "\n".join(pages)
+
+    return f"""
+    <html>
+    <head>
+      <style>
+      {css}
+      </style>
+    </head>
+    <body>
+      {body}
+    </body>
+    </html>
+    """
+
+
+def html_to_pdf_bytes(html: str) -> bytes:
+    result = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=result)
+    return result.getvalue()
 
 
 # --------------------------------------------------------------------
@@ -829,7 +867,6 @@ def render_block_editor(block, block_idx, songs_df):
         with container:
             left, right = st.columns([8, 2])
 
-            # ---------------- COLUNA ESQUERDA ------------------------
             with left:
                 if item["type"] == "music":
                     title = item.get("title", "Nova música")
@@ -839,7 +876,6 @@ def render_block_editor(block, block_idx, songs_df):
                         label += f" – {artist}"
                     st.markdown(f"**{label}**")
 
-                    # Ver / editar cifra
                     cifra_id = item.get("cifra_id", "")
                     with st.expander("Ver cifra"):
                         if cifra_id:
@@ -893,7 +929,6 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM ----
                     bpm_val = item.get("bpm", "")
                     tom_original = item.get("tom_original", "") or item.get("tom", "")
                     tom_val = item.get("tom", tom_original)
@@ -919,7 +954,6 @@ def render_block_editor(block, block_idx, songs_df):
                     )
                     item["bpm"] = new_bpm
 
-                    # lista de tons: só maiores ou só menores
                     if tom_original.endswith("m"):
                         tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
                     else:
@@ -948,7 +982,6 @@ def render_block_editor(block, block_idx, songs_df):
                     label = f"⏸ PAUSA – {item.get('label','')}"
                     st.markdown(f"**{label}**")
 
-            # ---------------- COLUNA DIREITA --------------------------
             with right:
                 if st.button("⬆️", key=f"item_up_{block_idx}_{i}"):
                     move_item(block_idx, i, -1)
@@ -965,7 +998,6 @@ def render_block_editor(block, block_idx, songs_df):
 
         st.markdown("---")
 
-    # adicionar músicas / pausa
     add_col1, add_col2 = st.columns(2)
     if add_col1.button("+ Música", key=f"add_music_btn_{block_idx}"):
         st.session_state[f"show_add_music_{block_idx}"] = True
@@ -1029,7 +1061,7 @@ def render_song_database():
 
 
 # --------------------------------------------------------------------
-# 9. TELA INICIAL (HOME)
+# 9. TELA INICIAL
 # --------------------------------------------------------------------
 def render_home():
     st.title("PDL Setlist")
@@ -1084,7 +1116,6 @@ def main():
         render_home()
         return
 
-    # ---------------- EDITOR / PREVIEW -----------------
     top_left, top_right = st.columns([3, 1])
     with top_left:
         st.markdown(f"### Setlist: {st.session_state.setlist_name}")
@@ -1120,44 +1151,62 @@ def main():
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
-        cur = st.session_state.current_item
+        flat = flatten_blocks(blocks)
 
-        current_item = None
-        current_block_name = ""
-        footer_mode = "none"
-        footer_next_item = None
-        cur_block_idx = None
-        cur_item_idx = None
-
-        if cur is not None:
-            b_idx, i_idx = cur
-            if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
-                current_item = blocks[b_idx]["items"][i_idx]
-                current_block_name = blocks[b_idx]["name"]
-                cur_block_idx, cur_item_idx = b_idx, i_idx
-
-        if current_item is None:
-            for b_idx, block in enumerate(blocks):
-                if block["items"]:
-                    current_item = block["items"][0]
-                    current_block_name = block["name"]
-                    cur_block_idx, cur_item_idx = b_idx, 0
-                    break
-
-        if current_item is None:
+        if not flat:
             st.info("Adicione músicas ao setlist para ver o preview.")
-        else:
-            footer_mode, footer_next_item = get_footer_context(
-                blocks, cur_block_idx, cur_item_idx
-            )
+            return
 
-            html = build_sheet_page_html(
-                current_item,
-                footer_mode,
-                footer_next_item,
-                current_block_name,
+        # garante que current_item sempre aponte para algo válido
+        cur = st.session_state.current_item
+        if cur not in flat:
+            st.session_state.current_item = flat[0]
+            cur = flat[0]
+
+        b_idx, i_idx = cur
+        current_item = blocks[b_idx]["items"][i_idx]
+        current_block_name = blocks[b_idx]["name"]
+
+        footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+
+        html = build_sheet_page_html(
+            current_item,
+            footer_mode,
+            footer_next_item,
+            current_block_name,
+        )
+        st.components.v1.html(html, height=1200, scrolling=True)
+
+        # Navegação de páginas + PDF
+        page_index = flat.index(cur)
+        total_pages = len(flat)
+
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+
+        with nav_col1:
+            if st.button("⬅️ Página anterior") and page_index > 0:
+                st.session_state.current_item = flat[page_index - 1]
+                st.rerun()
+
+        with nav_col2:
+            st.markdown(
+                f"<p style='text-align:center;'>Página {page_index + 1} de {total_pages}</p>",
+                unsafe_allow_html=True,
             )
-            st.components.v1.html(html, height=1200, scrolling=True)
+            if st.button("📄 Exportar setlist em PDF"):
+                full_html = build_full_setlist_html(blocks)
+                pdf_bytes = html_to_pdf_bytes(full_html)
+                st.download_button(
+                    "Baixar PDF",
+                    data=pdf_bytes,
+                    file_name=f"{st.session_state.setlist_name}.pdf",
+                    mime="application/pdf",
+                )
+
+        with nav_col3:
+            if st.button("Próxima página ➡️") and page_index < total_pages - 1:
+                st.session_state.current_item = flat[page_index + 1]
+                st.rerun()
 
 
 if __name__ == "__main__":

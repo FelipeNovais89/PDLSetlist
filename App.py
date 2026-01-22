@@ -10,11 +10,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-
-
 # --------------------------------------------------------------------
 # 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
 # --------------------------------------------------------------------
@@ -183,22 +178,52 @@ def load_songs_df():
     records = ws.get_all_records()
     if not records:
         df = pd.DataFrame(
-            columns=["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID"]
+            columns=[
+                "Título",
+                "Artista",
+                "Tom_Original",
+                "BPM",
+                "CifraDriveID",
+                "CifraSimplificadaID",  # nova coluna F
+            ]
         )
     else:
         df = pd.DataFrame(records)
 
-    for col in ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID"]:
+    for col in [
+        "Título",
+        "Artista",
+        "Tom_Original",
+        "BPM",
+        "CifraDriveID",
+        "CifraSimplificadaID",
+    ]:
         if col not in df.columns:
             df[col] = ""
 
     return df
 
 
-def append_song_to_sheet(title: str, artist: str, tom_original: str, bpm, cifra_id: str):
+def append_song_to_sheet(
+    title: str,
+    artist: str,
+    tom_original: str,
+    bpm,
+    cifra_id: str,
+    cifra_simplificada_id: str,
+):
     sh = get_spreadsheet()
     ws = sh.sheet1
-    ws.append_row([title, artist, tom_original, bpm or "", cifra_id or ""])
+    ws.append_row(
+        [
+            title,
+            artist,
+            tom_original,
+            bpm or "",
+            cifra_id or "",
+            cifra_simplificada_id or "",
+        ]
+    )
     load_songs_df.clear()
 
 
@@ -215,6 +240,8 @@ SETLIST_COLS = [
     "Tom",
     "BPM",
     "CifraDriveID",
+    "CifraSimplificadaID",
+    "UseSimplificada",
     "PauseLabel",
 ]
 
@@ -255,7 +282,6 @@ def load_setlist_df(name: str) -> pd.DataFrame:
     try:
         ws = sh.worksheet(name)
     except gspread.WorksheetNotFound:
-        # se não existir, retorna DF vazio
         df = pd.DataFrame(columns=SETLIST_COLS)
         return df
 
@@ -301,6 +327,8 @@ def save_current_setlist_to_sheet():
                 "Tom": "",
                 "BPM": "",
                 "CifraDriveID": "",
+                "CifraSimplificadaID": "",
+                "UseSimplificada": "",
                 "PauseLabel": "",
             }
             if item["type"] == "music":
@@ -309,6 +337,12 @@ def save_current_setlist_to_sheet():
                 base["Tom"] = item.get("tom", "")
                 base["BPM"] = item.get("bpm", "")
                 base["CifraDriveID"] = item.get("cifra_id", "")
+                base["CifraSimplificadaID"] = item.get(
+                    "cifra_simplificada_id", ""
+                )
+                base["UseSimplificada"] = "1" if item.get(
+                    "use_simplificada", False
+                ) else "0"
             else:
                 base["PauseLabel"] = item.get("label", "Pausa")
 
@@ -324,12 +358,22 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
     if df_sel.empty:
         return
 
-    df_sel["BlockIndex"] = pd.to_numeric(df_sel["BlockIndex"], errors="coerce").fillna(0).astype(int)
-    df_sel["ItemIndex"] = pd.to_numeric(df_sel["ItemIndex"], errors="coerce").fillna(0).astype(int)
+    df_sel["BlockIndex"] = (
+        pd.to_numeric(df_sel["BlockIndex"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    df_sel["ItemIndex"] = (
+        pd.to_numeric(df_sel["ItemIndex"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
     df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
 
     blocks = []
-    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
+    for (block_idx, block_name), group in df_sel.groupby(
+        ["BlockIndex", "BlockName"], sort=True
+    ):
         items = []
         for _, row in group.iterrows():
             if row["ItemType"] == "pause":
@@ -345,15 +389,39 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
                 tom_saved = row.get("Tom", "")
                 bpm_saved = row.get("BPM", "")
                 cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
+                cifra_simplificada_saved = str(
+                    row.get("CifraSimplificadaID", "")
+                ).strip()
+                use_simplificada_saved = str(
+                    row.get("UseSimplificada", "0")
+                ).strip()
+                use_simplificada = use_simplificada_saved in (
+                    "1",
+                    "true",
+                    "True",
+                    "Y",
+                    "y",
+                )
 
                 song_row = songs_df[songs_df["Título"] == title]
                 if not song_row.empty:
                     song_row = song_row.iloc[0]
                     tom_original = song_row.get("Tom_Original", "") or tom_saved
-                    cifra_id = str(song_row.get("CifraDriveID", "")).strip() or cifra_id_saved
+                    cifra_id_bank = str(
+                        song_row.get("CifraDriveID", "")
+                    ).strip()
+                    cifra_simplificada_bank = str(
+                        song_row.get("CifraSimplificadaID", "")
+                    ).strip()
+
+                    cifra_id = cifra_id_saved or cifra_id_bank
+                    cifra_simplificada_id = (
+                        cifra_simplificada_saved or cifra_simplificada_bank
+                    )
                 else:
                     tom_original = tom_saved
                     cifra_id = cifra_id_saved
+                    cifra_simplificada_id = cifra_simplificada_saved
 
                 items.append(
                     {
@@ -364,6 +432,8 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
                         "tom": tom_saved or tom_original,
                         "bpm": bpm_saved,
                         "cifra_id": cifra_id,
+                        "cifra_simplificada_id": cifra_simplificada_id,
+                        "use_simplificada": use_simplificada,
                         "text": "",
                     }
                 )
@@ -379,7 +449,6 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
     st.session_state.setlist_name = setlist_name
     st.session_state.current_item = None
     st.session_state.screen = "editor"
-    st.session_state.current_page_index = 0
 
 
 # --------------------------------------------------------------------
@@ -465,9 +534,6 @@ def init_state():
 
     if "screen" not in st.session_state:
         st.session_state.screen = "home"  # tela inicial
-
-    if "current_page_index" not in st.session_state:
-        st.session_state.current_page_index = 0
 
 
 # --------------------------------------------------------------------
@@ -564,40 +630,6 @@ def build_footer_end_of_block():
     """
 
 
-def compute_page_fields(item, block_name):
-    """Campos comuns usados no HTML e no PDF."""
-    if item["type"] == "pause":
-        title = item.get("label", "PAUSA")
-        artist = block_name
-        tom = ""
-        bpm = ""
-        raw_body = "PAUSA / INTERVALO"
-        tom_original = ""
-        tom_atual = ""
-    else:
-        title = item.get("title", "NOVA MÚSICA")
-        artist = item.get("artist", "")
-        tom_original = item.get("tom_original", "") or item.get("tom", "")
-        tom = item.get("tom", tom_original)
-        bpm = item.get("bpm", "")
-
-        cifra_id = item.get("cifra_id", "")
-        if cifra_id:
-            raw_body = load_chord_from_drive(cifra_id)
-        else:
-            raw_body = item.get("text", "CIFRA / TEXTO AQUI (ainda não cadastrada).")
-        tom_atual = tom
-
-    if item["type"] == "pause":
-        body_final = raw_body
-    else:
-        body_transposed = transpose_body_text(raw_body, tom_original, tom_atual)
-        body_norm = normalize_lyrics_indent(body_transposed)
-        body_final = strip_chord_markers_for_display(body_norm)
-
-    return title, artist, tom, bpm, body_final
-
-
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     if item["type"] == "pause":
         title = item.get("label", "PAUSA")
@@ -614,11 +646,18 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         tom = item.get("tom", tom_original)
         bpm = item.get("bpm", "")
 
+        use_simplificada = item.get("use_simplificada", False)
         cifra_id = item.get("cifra_id", "")
-        if cifra_id:
+        cifra_simplificada_id = item.get("cifra_simplificada_id", "")
+
+        if use_simplificada and cifra_simplificada_id:
+            raw_body = load_chord_from_drive(cifra_simplificada_id)
+        elif cifra_id:
             raw_body = load_chord_from_drive(cifra_id)
         else:
-            raw_body = item.get("text", "CIFRA / TEXTO AQUI (ainda não cadastrada).")
+            raw_body = item.get(
+                "text", "CIFRA / TEXTO AQUI (ainda não cadastrada)."
+            )
         tom_atual = tom
 
     if item["type"] == "pause":
@@ -661,28 +700,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             padding: 16px;
             background: #111;
         }}
-
-        /* wrapper que ocupa 100% da largura do dispositivo */
-        .sheet-viewport {{
-            width: 100vw;
-            max-width: 100%;
-            overflow-x: hidden;
-        }}
-
-        /* folha "lógica" de 800 px que é escalada para caber em 100vw */
         .sheet {{
             width: 800px;
             height: 1130px;
             background: white;
-            padding: 5px 5px 5px 5px;
+            padding: 40px 40px 60px 40px;
             box-sizing: border-box;
             font-family: "Courier New", monospace;
             margin: 0 auto;
-
-            /* aqui é a mágica: escala proporcional à largura da tela,
-               mas nunca cresce além de 1 (800px) */
-            transform-origin: top left;
-            transform: scale(calc(min(100vw, 800px) / 800));
         }}
 
         .sheet-header {{
@@ -701,60 +726,63 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         .sheet-header-main .sheet-title {{
             font-weight: 700;
             text-transform: uppercase;
-            font-size: 12px;
+            font-size: 8px;
         }}
         .sheet-header-main .sheet-artist {{
             font-weight: 400;
-            font-size: 10px;
+            font-size: 6px;
         }}
         .sheet-label {{
             font-weight: 700;
             text-align: center;
-            font-size: 12px;
+            font-size: 8px;
         }}
         .sheet-value {{
             text-align: center;
             font-weight: 400;
-            font-size: 10px;
+            font-size: 6px;
         }}
 
         .sheet-body {{
-            padding: 5px 5px 5px 5px;
+            padding: 12px 8px 12px 8px;
             min-height: 420px;
         }}
-
         .sheet-body-text {{
-            /* NUNCA QUEBRAR LINHA */
-            white-space: pre;
+            white-space: pre-wrap;
             font-family: "Courier New", monospace;
-            font-size: 10px;        /* tamanho base (PDF usa isso) */
+            font-size: 10px;
             line-height: 1.3;
         }}
 
         .sheet-footer {{
-            font-size: 12px;
+            font-size: 8px;
             margin-top: auto;
             padding-top: 4px;
             border-top: 1px solid #ccc;
         }}
+
         .sheet-footer-grid {{
             display: flex;
             flex-direction: column;
         }}
+
         .sheet-next-label {{
             font-weight: 700;
             margin-bottom: 2px;
             text-align: left;
         }}
+
         .sheet-next-header-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
+
         .sheet-next-title {{
             font-weight: 700;
             text-transform: uppercase;
         }}
+
         .sheet-next-tombpm-header {{
             display: grid;
             grid-template-columns: 1fr 0.25fr;
@@ -763,15 +791,18 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             margin-right: 16px;
             text-align: center;
         }}
+
         .sheet-next-tom-header,
         .sheet-next-bpm-header {{
             font-weight: 700;
         }}
+
         .sheet-next-values-row {{
             display: flex;
             justify-content: space-between;
             align-items: baseline;
         }}
+
         .sheet-next-tombpm-values {{
             display: grid;
             grid-template-columns: 1fr 0.25fr;
@@ -780,26 +811,32 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             margin-right: 16px;
             text-align: center;
         }}
+
         .sheet-footer-center {{
             padding-top: 6px;
         }}
+
         .sheet-next-pause-wrapper {{
             display: flex;
             justify-content: center;
             margin-top: 4px;
         }}
+
         .sheet-next-pause {{
             font-size: 12px;
             font-weight: 700;
         }}
+
         .sheet-footer-endblock {{
             padding-top: 6px;
         }}
+
         .sheet-endblock-wrapper {{
             display: flex;
             justify-content: center;
             margin-top: 4px;
         }}
+
         .sheet-endblock-text {{
             font-size: 12px;
             font-weight: 700;
@@ -807,112 +844,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       </style>
     </head>
     <body>
-      <div class="sheet-viewport">
-        <div class="sheet">
-          {header_html}
-          {body_html}
-          {footer_html}
-        </div>
+      <div class="sheet">
+        {header_html}
+        {body_html}
+        {footer_html}
       </div>
     </body>
     </html>
     """
-
-
-# --------------------------------------------------------------------
-# 6b. PÁGINAS E PDF
-# --------------------------------------------------------------------
-def build_pages(blocks):
-    """Retorna lista linear de páginas com contexto de rodapé."""
-    pages = []
-    for b_idx, block in enumerate(blocks):
-        for i_idx, item in enumerate(block["items"]):
-            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
-            pages.append(
-                {
-                    "block_idx": b_idx,
-                    "item_idx": i_idx,
-                    "block_name": block["name"],
-                    "item": item,
-                    "footer_mode": footer_mode,
-                    "footer_next_item": footer_next_item,
-                }
-            )
-    return pages
-
-
-def build_page_text_for_pdf(item, block_name, footer_mode, footer_next_item):
-    title, artist, tom, bpm, body_final = compute_page_fields(item, block_name)
-
-    lines = []
-    lines.append(title or "NOVA MÚSICA")
-    if artist:
-        lines.append(artist)
-    tom_display = tom or "-"
-    bpm_display = bpm if bpm not in (None, "", 0) else "-"
-    lines.append(f"TOM: {tom_display}    BPM: {bpm_display}")
-    lines.append("")
-    lines.extend(body_final.splitlines())
-    lines.append("")
-
-    if footer_mode == "next_music" and footer_next_item is not None:
-        nt = footer_next_item.get("title", "")
-        na = footer_next_item.get("artist", "")
-        nn = footer_next_item.get("tom", "") or "-"
-        nb = footer_next_item.get("bpm", "") or "-"
-        lines.append(f"PRÓXIMA: {nt} ({na}) | TOM {nn} | BPM {nb}")
-    elif footer_mode == "next_pause" and footer_next_item is not None:
-        lbl = footer_next_item.get("label", "Pausa")
-        lines.append(f"PRÓXIMA: PAUSA – {lbl}")
-    elif footer_mode == "end_block":
-        lines.append("FIM DE BLOCO")
-
-    return "\n".join(lines)
-
-
-def export_pdf_from_pages(pages, setlist_name: str):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    left_margin = 20 * mm
-    top_margin = height - 20 * mm
-    line_height = 4.5 * mm
-
-    for page in pages:
-        text = build_page_text_for_pdf(
-            page["item"],
-            page["block_name"],
-            page["footer_mode"],
-            page["footer_next_item"],
-        )
-        y = top_margin
-        c.setFont("Courier", 9)
-        for line in text.split("\n"):
-            c.drawString(left_margin, y, line)
-            y -= line_height
-            if y < 15 * mm:
-                c.showPage()
-                c.setFont("Courier", 9)
-                y = top_margin
-        c.showPage()
-
-    c.save()
-    buffer.seek(0)
-    filename = f"{setlist_name or 'setlist'}.pdf"
-    return buffer, filename
-
-
-def set_preview_page_for_item(block_idx, item_idx):
-    """Quando clica em Prev em um item, posiciona o índice de página nesse item."""
-    blocks = st.session_state.blocks
-    idx = 0
-    for b_i, blk in enumerate(blocks):
-        for i_i, _ in enumerate(blk["items"]):
-            if b_i == block_idx and i_i == item_idx:
-                st.session_state.current_page_index = idx
-                return
-            idx += 1
 
 
 # --------------------------------------------------------------------
@@ -970,7 +909,9 @@ def render_block_editor(block, block_idx, songs_df):
     for i, item in enumerate(block["items"]):
         container = st.container()
         with container:
-            left, right = st.columns([8, 2])
+            # coluna esquerda = música/BPM/Tom
+            # coluna direita = subir/descer/apagar/preview
+            left, right = st.columns([5, 1])
 
             # ---------------- COLUNA ESQUERDA ------------------------
             with left:
@@ -982,10 +923,35 @@ def render_block_editor(block, block_idx, songs_df):
                         label += f" – {artist}"
                     st.markdown(f"**{label}**")
 
-                    # Ver / editar cifra
+                    # estado da cifra simplificada/original
+                    use_simplificada = item.get("use_simplificada", False)
                     cifra_id = item.get("cifra_id", "")
+                    cifra_simplificada_id = item.get(
+                        "cifra_simplificada_id", ""
+                    )
+
+                    toggle_label = (
+                        "Simplificar" if not use_simplificada else "Original"
+                    )
+                    if st.button(
+                        toggle_label,
+                        key=f"simplify_toggle_{block_idx}_{i}",
+                    ):
+                        if cifra_simplificada_id:
+                            item["use_simplificada"] = not use_simplificada
+                        else:
+                            st.warning(
+                                "Nenhuma cifra simplificada cadastrada para esta música (coluna CifraSimplificadaID)."
+                            )
+                        st.rerun()
+
+                    # Ver / editar cifra
                     with st.expander("Ver cifra"):
-                        if cifra_id:
+                        if item.get("use_simplificada", False) and cifra_simplificada_id:
+                            cifra_text = load_chord_from_drive(
+                                cifra_simplificada_id
+                            )
+                        elif cifra_id:
                             cifra_text = load_chord_from_drive(cifra_id)
                         else:
                             cifra_text = item.get("text", "")
@@ -996,12 +962,16 @@ def render_block_editor(block, block_idx, songs_df):
                         if col_font_minus.button(
                             "A﹣", key=f"font_minus_{block_idx}_{i}"
                         ):
-                            st.session_state.cifra_font_size = max(8, font_size - 1)
+                            st.session_state.cifra_font_size = max(
+                                8, font_size - 1
+                            )
                             st.rerun()
                         if col_font_plus.button(
                             "A﹢", key=f"font_plus_{block_idx}_{i}"
                         ):
-                            st.session_state.cifra_font_size = min(24, font_size + 1)
+                            st.session_state.cifra_font_size = min(
+                                24, font_size + 1
+                            )
                             st.rerun()
 
                         edit_key = f"cifra_edit_{block_idx}_{i}"
@@ -1025,8 +995,17 @@ def render_block_editor(block, block_idx, songs_df):
                             unsafe_allow_html=True,
                         )
 
-                        if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
-                            if cifra_id:
+                        if st.button(
+                            "Salvar cifra", key=f"save_cifra_{block_idx}_{i}"
+                        ):
+                            if item.get("use_simplificada", False) and cifra_simplificada_id:
+                                save_chord_to_drive(
+                                    cifra_simplificada_id, edited
+                                )
+                                st.success(
+                                    "Cifra simplificada atualizada no Drive."
+                                )
+                            elif cifra_id:
                                 save_chord_to_drive(cifra_id, edited)
                                 st.success("Cifra atualizada no Drive.")
                             else:
@@ -1036,37 +1015,43 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM ----
+                    # ---- Linha BPM / TOM (lado a lado) ----
                     bpm_val = item.get("bpm", "")
-                    tom_original = item.get("tom_original", "") or item.get("tom", "")
+                    tom_original = item.get("tom_original", "") or item.get(
+                        "tom", ""
+                    )
                     tom_val = item.get("tom", tom_original)
 
-                    lab_bpm, lab_tom = st.columns([1.5, 1.4])
+                    lab_bpm, lab_tom = st.columns(2)
                     lab_bpm.markdown(
-                        "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
+                        "<p style='text-align:center;font-size:0.7rem;'>BPM</p>",
                         unsafe_allow_html=True,
                     )
                     lab_tom.markdown(
-                        "<p style='text-align:center;font-size:0.8rem;'>Tom</p>",
+                        "<p style='text-align:center;font-size:0.7rem;'>Tom</p>",
                         unsafe_allow_html=True,
                     )
 
-                    col_bpm, col_tom = st.columns([1.5, 1.4])
+                    col_bpm, col_tom = st.columns(2)
 
                     new_bpm = col_bpm.text_input(
                         "BPM",
-                        value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
+                        value=str(bpm_val)
+                        if bpm_val not in ("", None, 0)
+                        else "",
                         key=f"bpm_{block_idx}_{i}",
                         label_visibility="collapsed",
                         placeholder="BPM",
                     )
                     item["bpm"] = new_bpm
 
-                    # lista de tons: só maiores ou só menores
+                    # lista de tons: só maiores ou só menores, conforme tom original
                     if tom_original.endswith("m"):
                         tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
                     else:
-                        tone_list = [t for t in TONE_OPTIONS if not t.endswith("m")]
+                        tone_list = [
+                            t for t in TONE_OPTIONS if not t.endswith("m")
+                        ]
 
                     if tom_val not in tone_list and tom_val:
                         tone_list = [tom_val] + tone_list
@@ -1102,8 +1087,8 @@ def render_block_editor(block, block_idx, songs_df):
                 if st.button("❌", key=f"item_del_{block_idx}_{i}"):
                     delete_item(block_idx, i)
                     st.rerun()
-                if st.button("Prev", key=f"preview_{block_idx}_{i}"):
-                    set_preview_page_for_item(block_idx, i)
+                if st.button("Preview", key=f"preview_{block_idx}_{i}"):
+                    st.session_state.current_item = (block_idx, i)
                     st.rerun()
 
         st.markdown("---")
@@ -1129,6 +1114,9 @@ def render_block_editor(block, block_idx, songs_df):
             for title in selected:
                 row = songs_df[songs_df["Título"] == title].iloc[0]
                 cifra_id = str(row.get("CifraDriveID", "")).strip()
+                cifra_simplificada_id = str(
+                    row.get("CifraSimplificadaID", "")
+                ).strip()
                 item = {
                     "type": "music",
                     "title": row.get("Título", ""),
@@ -1137,6 +1125,8 @@ def render_block_editor(block, block_idx, songs_df):
                     "tom": row.get("Tom_Original", ""),
                     "bpm": row.get("BPM", ""),
                     "cifra_id": cifra_id,
+                    "cifra_simplificada_id": cifra_simplificada_id,
+                    "use_simplificada": False,
                     "text": "",
                 }
                 block["items"].append(item)
@@ -1159,13 +1149,23 @@ def render_song_database():
         artist = st.text_input("Artista")
         tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)")
         bpm = st.text_input("BPM")
-        cifra_id = st.text_input("ID da cifra no Drive (opcional)")
+        cifra_id = st.text_input("ID da cifra ORIGINAL no Drive (opcional)")
+        cifra_simplificada_id = st.text_input(
+            "ID da cifra SIMPLIFICADA no Drive (opcional – coluna F: CifraSimplificadaID)"
+        )
 
         if st.button("Salvar no banco"):
             if title.strip() == "":
                 st.warning("Preencha pelo menos o título.")
             else:
-                append_song_to_sheet(title, artist, tom_original, bpm, cifra_id)
+                append_song_to_sheet(
+                    title,
+                    artist,
+                    tom_original,
+                    bpm,
+                    cifra_id,
+                    cifra_simplificada_id,
+                )
                 st.success("Música adicionada ao Google Sheets!")
                 st.session_state.songs_df = load_songs_df()
                 st.rerun()
@@ -1193,7 +1193,6 @@ def render_home():
             st.session_state.setlist_name = new_name.strip() or "Setlist sem nome"
             st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
             st.session_state.current_item = None
-            st.session_state.current_page_index = 0
             st.session_state.screen = "editor"
             st.rerun()
 
@@ -1209,7 +1208,9 @@ def render_home():
                 load_setlist_into_state(selected, st.session_state.songs_df)
                 st.rerun()
         else:
-            st.info("Nenhuma aba de setlist encontrada (apenas a primeira é o banco de músicas).")
+            st.info(
+                "Nenhuma aba de setlist encontrada (apenas a primeira é o banco de músicas)."
+            )
 
 
 # --------------------------------------------------------------------
@@ -1264,55 +1265,44 @@ def main():
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
-        pages = build_pages(blocks)
+        cur = st.session_state.current_item
 
-        if not pages:
+        current_item = None
+        current_block_name = ""
+        footer_mode = "none"
+        footer_next_item = None
+        cur_block_idx = None
+        cur_item_idx = None
+
+        if cur is not None:
+            b_idx, i_idx = cur
+            if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
+                current_item = blocks[b_idx]["items"][i_idx]
+                current_block_name = blocks[b_idx]["name"]
+                cur_block_idx, cur_item_idx = b_idx, i_idx
+
+        if current_item is None:
+            for b_idx, block in enumerate(blocks):
+                if block["items"]:
+                    current_item = block["items"][0]
+                    current_block_name = block["name"]
+                    cur_block_idx, cur_item_idx = b_idx, 0
+                    break
+
+        if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            # garante que o índice está dentro dos limites
-            if st.session_state.current_page_index >= len(pages):
-                st.session_state.current_page_index = len(pages) - 1
-            if st.session_state.current_page_index < 0:
-                st.session_state.current_page_index = 0
-
-            page = pages[st.session_state.current_page_index]
+            footer_mode, footer_next_item = get_footer_context(
+                blocks, cur_block_idx, cur_item_idx
+            )
 
             html = build_sheet_page_html(
-                page["item"],
-                page["footer_mode"],
-                page["footer_next_item"],
-                page["block_name"],
+                current_item,
+                footer_mode,
+                footer_next_item,
+                current_block_name,
             )
             st.components.v1.html(html, height=1200, scrolling=True)
-
-            # navegação + export PDF centralizados
-            col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
-
-            with col2:
-                if st.button("⬅️", disabled=st.session_state.current_page_index == 0):
-                    if st.session_state.current_page_index > 0:
-                        st.session_state.current_page_index -= 1
-                        st.rerun()
-
-            with col3:
-                if st.button(
-                    "➡️",
-                    disabled=st.session_state.current_page_index == len(pages) - 1,
-                ):
-                    if st.session_state.current_page_index < len(pages) - 1:
-                        st.session_state.current_page_index += 1
-                        st.rerun()
-
-            pdf_buffer, filename = export_pdf_from_pages(
-                pages, st.session_state.setlist_name
-            )
-            with col4:
-                st.download_button(
-                    "Export PDF",
-                    data=pdf_buffer,
-                    file_name=filename,
-                    mime="application/pdf",
-                )
 
 
 if __name__ == "__main__":

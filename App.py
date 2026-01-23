@@ -10,6 +10,15 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
+import google.generativeai as genai  # GEMINI
+
+# --------------------------------------------------------------------
+# Configuração do Gemini
+# --------------------------------------------------------------------
+if "gemini_api_key" in st.secrets:
+    genai.configure(api_key=st.secrets["gemini_api_key"])
+
+
 # --------------------------------------------------------------------
 # 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
 # --------------------------------------------------------------------
@@ -154,7 +163,75 @@ def strip_chord_markers_for_display(text: str) -> str:
 
 
 # --------------------------------------------------------------------
-# 1. GOOGLE SHEETS – CLIENTE E BANCO DE MÚSICAS (ABA 1)
+# 1. GEMINI + CRIAÇÃO DE ARQUIVOS NO DRIVE
+# --------------------------------------------------------------------
+def transcribe_image_with_gemini(uploaded_file):
+    """Envia a imagem para o Gemini e retorna a cifra formatada."""
+    if "gemini_api_key" not in st.secrets:
+        st.error("Gemini API key não configurada em st.secrets['gemini_api_key'].")
+        return ""
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    prompt = """
+    Transcreva esta imagem de cifra para cavaquinho/violão.
+
+    REGRAS DE FORMATAÇÃO:
+    1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
+    2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
+    3. Mantenha o alinhamento dos acordes exatamente acima das sílabas da letra.
+    4. Ignore diagramas de braço de instrumento, foque no texto e cifras.
+    """
+
+    mime = uploaded_file.type or "image/jpeg"
+    img_data = uploaded_file.getvalue()
+
+    response = model.generate_content(
+        [
+            prompt,
+            {"mime_type": mime, "data": img_data},
+        ]
+    )
+
+    return response.text or ""
+
+
+def create_chord_in_drive(filename, content):
+    """Cria um novo arquivo .txt no Drive e retorna o FileID."""
+    try:
+        service = get_drive_service()
+
+        # ID da pasta (opcional) nos secrets
+        folder_id = st.secrets["sheets"].get("folder_id", None)
+
+        file_metadata = {
+            "name": f"{filename}.txt",
+            "mimeType": "text/plain",
+        }
+        if folder_id:
+            file_metadata["parents"] = [folder_id]
+
+        fh = io.BytesIO(content.encode("utf-8"))
+        media = MediaIoBaseUpload(fh, mimetype="text/plain")
+
+        file = (
+            service.files()
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields="id",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        return file.get("id")
+    except Exception as e:
+        st.error(f"Erro no Drive: {e}")
+        return None
+
+
+# --------------------------------------------------------------------
+# 2. GOOGLE SHEETS – CLIENTE E BANCO DE MÚSICAS (ABA 1)
 # --------------------------------------------------------------------
 def get_gspread_client():
     secrets = st.secrets["gcp_service_account"]
@@ -184,7 +261,7 @@ def load_songs_df():
                 "Tom_Original",
                 "BPM",
                 "CifraDriveID",
-                "CifraSimplificadaID",  # nova coluna F
+                "CifraSimplificadaID",  # coluna F
             ]
         )
     else:
@@ -228,7 +305,7 @@ def append_song_to_sheet(
 
 
 # --------------------------------------------------------------------
-# 2. GOOGLE SHEETS – UMA ABA POR SETLIST
+# 3. GOOGLE SHEETS – UMA ABA POR SETLIST
 # --------------------------------------------------------------------
 SETLIST_COLS = [
     "BlockIndex",
@@ -247,37 +324,26 @@ SETLIST_COLS = [
 
 
 def list_setlist_names():
-    """
-    Retorna a lista de nomes de abas que serão tratadas como setlists.
-    Convenção:
-      - sheet1 = banco de músicas
-      - todas as outras abas = setlists
-    """
     sh = get_spreadsheet()
     worksheets = sh.worksheets()
-    # primeira aba é o banco de músicas
-    setlists = [ws.title for ws in worksheets[1:]]
+    setlists = [ws.title for ws in worksheets[1:]]  # sheet1 é banco de músicas
     return setlists
 
 
 def get_or_create_setlist_ws(name: str):
-    """Abre (ou cria) a worksheet com esse nome para a setlist."""
     sh = get_spreadsheet()
     name = (name or "").strip() or "Setlist sem nome"
 
-    # tenta abrir
     for ws in sh.worksheets():
         if ws.title == name:
             return ws
 
-    # se não existe, cria
     ws = sh.add_worksheet(title=name, rows=1000, cols=len(SETLIST_COLS))
     ws.append_row(SETLIST_COLS)
     return ws
 
 
 def load_setlist_df(name: str) -> pd.DataFrame:
-    """Lê a aba da setlist (pelo nome) em um DataFrame."""
     sh = get_spreadsheet()
     try:
         ws = sh.worksheet(name)
@@ -299,7 +365,6 @@ def load_setlist_df(name: str) -> pd.DataFrame:
 
 
 def write_setlist_df(name: str, df: pd.DataFrame):
-    """Sobrescreve a aba da setlist (pelo nome) com o DF fornecido."""
     ws = get_or_create_setlist_ws(name)
     ws.clear()
     ws.append_row(SETLIST_COLS)
@@ -308,7 +373,6 @@ def write_setlist_df(name: str, df: pd.DataFrame):
 
 
 def save_current_setlist_to_sheet():
-    """Pega blocks do session_state e grava na aba da setlist (uma aba por setlist)."""
     name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
 
     blocks = st.session_state.blocks
@@ -340,9 +404,9 @@ def save_current_setlist_to_sheet():
                 base["CifraSimplificadaID"] = item.get(
                     "cifra_simplificada_id", ""
                 )
-                base["UseSimplificada"] = "1" if item.get(
-                    "use_simplificada", False
-                ) else "0"
+                base["UseSimplificada"] = (
+                    "1" if item.get("use_simplificada", False) else "0"
+                )
             else:
                 base["PauseLabel"] = item.get("label", "Pausa")
 
@@ -353,7 +417,6 @@ def save_current_setlist_to_sheet():
 
 
 def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
-    """Lê a aba (setlist_name) e monta blocks em session_state."""
     df_sel = load_setlist_df(setlist_name)
     if df_sel.empty:
         return
@@ -452,7 +515,7 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
 
 
 # --------------------------------------------------------------------
-# 3. GOOGLE DRIVE – CIFRAS .TXT
+# 4. GOOGLE DRIVE – CIFRAS .TXT
 # --------------------------------------------------------------------
 def get_drive_service():
     secrets = st.secrets["gcp_service_account"]
@@ -512,7 +575,7 @@ def save_chord_to_drive(file_id: str, content: str):
 
 
 # --------------------------------------------------------------------
-# 4. ESTADO INICIAL
+# 5. ESTADO INICIAL
 # --------------------------------------------------------------------
 def init_state():
     if "songs_df" not in st.session_state:
@@ -537,7 +600,7 @@ def init_state():
 
 
 # --------------------------------------------------------------------
-# 5. RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
+# 6. RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
 # --------------------------------------------------------------------
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     items = blocks[cur_block_idx]["items"]
@@ -557,7 +620,7 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 # --------------------------------------------------------------------
-# 6. HTML (HEADER / FOOTER / PÁGINA)
+# 7. HTML (HEADER / FOOTER / PÁGINA)
 # --------------------------------------------------------------------
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
@@ -855,7 +918,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 
 # --------------------------------------------------------------------
-# 7. EDITOR DE BLOCOS
+# 8. EDITOR DE BLOCOS
 # --------------------------------------------------------------------
 def move_item(block_idx, item_idx, direction):
     items = st.session_state.blocks[block_idx]["items"]
@@ -909,9 +972,7 @@ def render_block_editor(block, block_idx, songs_df):
     for i, item in enumerate(block["items"]):
         container = st.container()
         with container:
-            # coluna esquerda = música/BPM/Tom
-            # coluna direita = subir/descer/apagar/preview
-            left, right = st.columns([5, 1])
+            left, right = st.columns([8, 1.2])
 
             # ---------------- COLUNA ESQUERDA ------------------------
             with left:
@@ -923,36 +984,31 @@ def render_block_editor(block, block_idx, songs_df):
                         label += f" – {artist}"
                     st.markdown(f"**{label}**")
 
-                    # estado da cifra simplificada/original
+                    # Botão Simplificar / Original
                     use_simplificada = item.get("use_simplificada", False)
-                    cifra_id = item.get("cifra_id", "")
-                    cifra_simplificada_id = item.get(
-                        "cifra_simplificada_id", ""
-                    )
-
-                    toggle_label = (
-                        "Simplificar" if not use_simplificada else "Original"
-                    )
+                    btn_label = "Original" if use_simplificada else "Simplificar"
                     if st.button(
-                        toggle_label,
-                        key=f"simplify_toggle_{block_idx}_{i}",
+                        btn_label,
+                        key=f"simpl_btn_{block_idx}_{i}",
+                        help="Alternar entre cifra original e versão simplificada",
                     ):
-                        if cifra_simplificada_id:
-                            item["use_simplificada"] = not use_simplificada
-                        else:
-                            st.warning(
-                                "Nenhuma cifra simplificada cadastrada para esta música (coluna CifraSimplificadaID)."
-                            )
+                        item["use_simplificada"] = not use_simplificada
                         st.rerun()
 
                     # Ver / editar cifra
+                    cifra_id = item.get("cifra_id", "")
+                    cifra_simplificada_id = item.get("cifra_simplificada_id", "")
                     with st.expander("Ver cifra"):
-                        if item.get("use_simplificada", False) and cifra_simplificada_id:
-                            cifra_text = load_chord_from_drive(
-                                cifra_simplificada_id
-                            )
+                        # Decide qual arquivo carregar (seguindo o mesmo critério do preview)
+                        if use_simplificada and cifra_simplificada_id:
+                            current_id = cifra_simplificada_id
                         elif cifra_id:
-                            cifra_text = load_chord_from_drive(cifra_id)
+                            current_id = cifra_id
+                        else:
+                            current_id = None
+
+                        if current_id:
+                            cifra_text = load_chord_from_drive(current_id)
                         else:
                             cifra_text = item.get("text", "")
 
@@ -962,16 +1018,12 @@ def render_block_editor(block, block_idx, songs_df):
                         if col_font_minus.button(
                             "A﹣", key=f"font_minus_{block_idx}_{i}"
                         ):
-                            st.session_state.cifra_font_size = max(
-                                8, font_size - 1
-                            )
+                            st.session_state.cifra_font_size = max(8, font_size - 1)
                             st.rerun()
                         if col_font_plus.button(
                             "A﹢", key=f"font_plus_{block_idx}_{i}"
                         ):
-                            st.session_state.cifra_font_size = min(
-                                24, font_size + 1
-                            )
+                            st.session_state.cifra_font_size = min(24, font_size + 1)
                             st.rerun()
 
                         edit_key = f"cifra_edit_{block_idx}_{i}"
@@ -995,18 +1047,10 @@ def render_block_editor(block, block_idx, songs_df):
                             unsafe_allow_html=True,
                         )
 
-                        if st.button(
-                            "Salvar cifra", key=f"save_cifra_{block_idx}_{i}"
-                        ):
-                            if item.get("use_simplificada", False) and cifra_simplificada_id:
-                                save_chord_to_drive(
-                                    cifra_simplificada_id, edited
-                                )
-                                st.success(
-                                    "Cifra simplificada atualizada no Drive."
-                                )
-                            elif cifra_id:
-                                save_chord_to_drive(cifra_id, edited)
+                        if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
+                            # Salva no arquivo correspondente (original ou simplificada)
+                            if current_id:
+                                save_chord_to_drive(current_id, edited)
                                 st.success("Cifra atualizada no Drive.")
                             else:
                                 item["text"] = edited
@@ -1015,43 +1059,38 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM (lado a lado) ----
+                    # ---- Linha BPM / TOM ----
                     bpm_val = item.get("bpm", "")
-                    tom_original = item.get("tom_original", "") or item.get(
-                        "tom", ""
-                    )
+                    tom_original = item.get("tom_original", "") or item.get("tom", "")
                     tom_val = item.get("tom", tom_original)
 
-                    lab_bpm, lab_tom = st.columns(2)
+                    # Labels BPM / Tom
+                    lab_bpm, lab_tom = st.columns([1, 1])
                     lab_bpm.markdown(
-                        "<p style='text-align:center;font-size:0.7rem;'>BPM</p>",
+                        "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
                         unsafe_allow_html=True,
                     )
                     lab_tom.markdown(
-                        "<p style='text-align:center;font-size:0.7rem;'>Tom</p>",
+                        "<p style='text-align:center;font-size:0.8rem;'>Tom</p>",
                         unsafe_allow_html=True,
                     )
 
-                    col_bpm, col_tom = st.columns(2)
+                    col_bpm, col_tom = st.columns([1, 1])
 
                     new_bpm = col_bpm.text_input(
                         "BPM",
-                        value=str(bpm_val)
-                        if bpm_val not in ("", None, 0)
-                        else "",
+                        value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
                         key=f"bpm_{block_idx}_{i}",
                         label_visibility="collapsed",
                         placeholder="BPM",
                     )
                     item["bpm"] = new_bpm
 
-                    # lista de tons: só maiores ou só menores, conforme tom original
+                    # lista de tons: só maiores ou só menores
                     if tom_original.endswith("m"):
                         tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
                     else:
-                        tone_list = [
-                            t for t in TONE_OPTIONS if not t.endswith("m")
-                        ]
+                        tone_list = [t for t in TONE_OPTIONS if not t.endswith("m")]
 
                     if tom_val not in tone_list and tom_val:
                         tone_list = [tom_val] + tone_list
@@ -1076,7 +1115,7 @@ def render_block_editor(block, block_idx, songs_df):
                     label = f"⏸ PAUSA – {item.get('label','')}"
                     st.markdown(f"**{label}**")
 
-            # ---------------- COLUNA DIREITA --------------------------
+            # ---------------- COLUNA DIREITA (SETAS / EXCLUIR / PREVIEW) ----------------
             with right:
                 if st.button("⬆️", key=f"item_up_{block_idx}_{i}"):
                     move_item(block_idx, i, -1)
@@ -1136,7 +1175,7 @@ def render_block_editor(block, block_idx, songs_df):
 
 
 # --------------------------------------------------------------------
-# 8. BANCO DE MÚSICAS
+# 9. BANCO DE MÚSICAS (DUAS CIFRAS + GEMINI)
 # --------------------------------------------------------------------
 def render_song_database():
     st.subheader("Banco de músicas (Google Sheets)")
@@ -1145,34 +1184,95 @@ def render_song_database():
     st.dataframe(df, use_container_width=True, height=240)
 
     with st.expander("Adicionar nova música ao banco"):
-        title = st.text_input("Título")
-        artist = st.text_input("Artista")
-        tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)")
-        bpm = st.text_input("BPM")
-        cifra_id = st.text_input("ID da cifra ORIGINAL no Drive (opcional)")
-        cifra_simplificada_id = st.text_input(
-            "ID da cifra SIMPLIFICADA no Drive (opcional – coluna F: CifraSimplificadaID)"
+        col1, col2 = st.columns(2)
+        with col1:
+            title = st.text_input("Título")
+            artist = st.text_input("Artista")
+        with col2:
+            tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)")
+            bpm = st.text_input("BPM")
+
+        st.markdown("---")
+        st.markdown("### Cifra Original")
+        uploaded_original = st.file_uploader(
+            "Suba uma foto da cifra OU arquivo .txt (Original)",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_original",
+        )
+        cifra_id_manual = st.text_input(
+            "Ou cole o ID do Drive da cifra original (opcional)",
+            key="cifra_id_manual",
+        )
+
+        st.markdown("### Cifra Simplificada (opcional)")
+        uploaded_simpl = st.file_uploader(
+            "Suba foto/arquivo .txt da versão simplificada (opcional)",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_simplificada",
+        )
+        cifra_simpl_manual = st.text_input(
+            "Ou cole o ID do Drive da cifra simplificada (opcional)",
+            key="cifra_simpl_manual",
         )
 
         if st.button("Salvar no banco"):
             if title.strip() == "":
                 st.warning("Preencha pelo menos o título.")
             else:
-                append_song_to_sheet(
-                    title,
-                    artist,
-                    tom_original,
-                    bpm,
-                    cifra_id,
-                    cifra_simplificada_id,
-                )
-                st.success("Música adicionada ao Google Sheets!")
-                st.session_state.songs_df = load_songs_df()
-                st.rerun()
+                with st.spinner("Processando e salvando..."):
+                    final_cifra_id = cifra_id_manual.strip() or ""
+                    final_simpl_id = cifra_simpl_manual.strip() or ""
+
+                    # --- ORIGINAL ---
+                    if uploaded_original:
+                        if uploaded_original.type == "text/plain":
+                            content_orig = uploaded_original.getvalue().decode(
+                                "utf-8"
+                            )
+                        else:
+                            content_orig = transcribe_image_with_gemini(
+                                uploaded_original
+                            )
+                        nome_arquivo_orig = f"{title} - {artist} (Original)"
+                        new_id = create_chord_in_drive(
+                            nome_arquivo_orig, content_orig
+                        )
+                        if new_id:
+                            final_cifra_id = new_id
+
+                    # --- SIMPLIFICADA ---
+                    if uploaded_simpl:
+                        if uploaded_simpl.type == "text/plain":
+                            content_simpl = uploaded_simpl.getvalue().decode(
+                                "utf-8"
+                            )
+                        else:
+                            content_simpl = transcribe_image_with_gemini(
+                                uploaded_simpl
+                            )
+                        nome_arquivo_simpl = f"{title} - {artist} (Simplificada)"
+                        new_s_id = create_chord_in_drive(
+                            nome_arquivo_simpl, content_simpl
+                        )
+                        if new_s_id:
+                            final_simpl_id = new_s_id
+
+                    append_song_to_sheet(
+                        title,
+                        artist,
+                        tom_original,
+                        bpm,
+                        final_cifra_id,
+                        final_simpl_id,
+                    )
+
+                    st.success(f"Música '{title}' cadastrada com sucesso!")
+                    st.session_state.songs_df = load_songs_df()
+                    st.rerun()
 
 
 # --------------------------------------------------------------------
-# 9. TELA INICIAL (HOME)
+# 10. TELA INICIAL (HOME)
 # --------------------------------------------------------------------
 def render_home():
     st.title("PDL Setlist")
@@ -1214,7 +1314,7 @@ def render_home():
 
 
 # --------------------------------------------------------------------
-# 10. MAIN
+# 11. MAIN
 # --------------------------------------------------------------------
 def main():
     st.set_page_config(
@@ -1302,6 +1402,8 @@ def main():
                 footer_next_item,
                 current_block_name,
             )
+
+            # Folha adaptável à largura da coluna
             st.components.v1.html(html, height=1200, scrolling=True)
 
 

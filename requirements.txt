@@ -6,3 +6,4 @@ google-auth-httplib2>=0.2.0
 httplib2>=0.22.0
 google-api-python-client
 reportlab
+google-generativeai>=0.7.0

@@ -166,29 +166,35 @@ def strip_chord_markers_for_display(text: str) -> str:
 # 1. GEMINI + CRIAÇÃO DE ARQUIVOS NO DRIVE
 # --------------------------------------------------------------------
 def transcribe_image_with_gemini(uploaded_file):
-    """Envia a imagem para o Gemini e retorna a cifra formatada."""
+    """Envia a imagem para o Gemini Pro e retorna a cifra com alinhamento preciso."""
     if "gemini_api_key" not in st.secrets:
         st.error("Gemini API key não configurada em st.secrets['gemini_api_key'].")
         return ""
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    prompt = """
-    Transcreva esta imagem de cifra para cavaquinho/violão.
-
-    REGRAS DE FORMATAÇÃO:
-    1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
-    2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
-    3. Mantenha o alinhamento dos acordes exatamente acima das sílabas da letra.
-    4. Ignore diagramas de braço de instrumento, foque no texto e cifras.
-    """
+    # MUDANÇA 1: Trocamos o modelo para o 'pro' (mais preciso visualmente)
+    # Se quiser testar o modelo que "pensa", use: 'gemini-2.0-flash-thinking-exp-1219'
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-pro",
+        system_instruction="""
+        Você é um especialista em transcrição de partituras e cifras musicais.
+        Sua tarefa é converter imagens em texto mantendo a fidelidade ESPACIAL absoluta.
+        
+        REGRAS CRÍTICAS:
+        1. Toda linha que contiver ACORDES deve obrigatoriamente começar com o caractere '|'.
+        2. Toda linha de LETRA deve obrigatoriamente começar com um ESPAÇO ' '.
+        3. O alinhamento vertical é sagrado: se um acorde está em cima da sílaba 'ção', 
+           você deve usar espaços em branco no texto para que ele fique exatamente ali.
+        4. Transcreva apenas o conteúdo musical (letra e acordes). Ignore cabeçalhos de sites ou propagandas.
+        """
+    )
 
     mime = uploaded_file.type or "image/jpeg"
     img_data = uploaded_file.getvalue()
 
+    # MUDANÇA 2: O prompt agora foca no mapeamento visual
     response = model.generate_content(
         [
-            prompt,
+            "Analise a imagem como uma grade e transcreva a cifra mantendo a posição exata de cada nota sobre a letra.",
             {"mime_type": mime, "data": img_data},
         ]
     )

@@ -184,34 +184,61 @@ def transcribe_image_with_gemini(uploaded_file):
     api_key = get_gemini_api_key()
     if not api_key:
         st.error(
-            "Gemini API key não configurada em st.secrets "
-            "(esperado 'gemini_api_key' no topo ou em [sheets])."
+            "Gemini API key não configurada. "
+            "Adicione 'gemini_api_key' no topo do secrets ou dentro de [sheets]."
         )
         return ""
 
-    model = genai.GenerativeModel("gemini-1.5-pro")
+    # DEBUG: mostrar tipo de arquivo
+    st.write("🔍 Gemini – tipo de arquivo recebido:", uploaded_file.type)
 
-    prompt = """
-    Transcreva esta imagem de cifra para cavaquinho/violão.
+    try:
+        # você pode usar "gemini-1.5-flash" ou "gemini-1.5-pro"
+        model = genai.GenerativeModel("gemini-1.5-pro")
 
-    REGRAS DE FORMATAÇÃO:
-    1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
-    2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
-    3. Mantenha o alinhamento dos acordes exatamente acima das sílabas da letra.
-    4. Ignore diagramas de braço de instrumento, foque no texto e cifras.
-    """
+        prompt = """
+        Transcreva esta imagem de cifra para cavaquinho/violão.
 
-    mime = uploaded_file.type or "image/jpeg"
-    img_data = uploaded_file.getvalue()
+        REGRAS DE FORMATAÇÃO:
+        1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
+        2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
+        3. Mantenha o alinhamento dos acordes exatamente acima das sílabas da letra.
+        4. Ignore diagramas de braço de instrumento, foque no texto e cifras.
+        5. NÃO use markdown, NÃO use ``` nem cabeçalhos; apenas texto puro.
+        """
 
-    response = model.generate_content(
-        [
-            prompt,
-            {"mime_type": mime, "data": img_data},
-        ]
-    )
+        mime = uploaded_file.type or "image/jpeg"
+        img_data = uploaded_file.getvalue()
 
-    return (response.text or "").strip()
+        st.write("🔍 Chamando Gemini…")
+        response = model.generate_content(
+            [
+                prompt,
+                {"mime_type": mime, "data": img_data},
+            ]
+        )
+
+        # garante string
+        text = (getattr(response, "text", "") or "").strip()
+
+        # DEBUG: mostra só o começo
+        st.write("🔍 Resposta bruta do Gemini (100 chars):", text[:100])
+
+        # Se vier como bloco de código markdown, limpamos
+        if text.startswith("```"):
+            # remove os crases
+            text = text.strip("`")
+            # às vezes vem "txt\n<conteúdo>"
+            if "\n" in text:
+                text = "\n".join(text.split("\n")[1:]).strip()
+
+        if not text:
+            st.warning("Gemini respondeu vazio. Tente outra imagem ou ajuste o prompt.")
+        return text
+
+    except Exception as e:
+        st.error(f"Erro ao chamar Gemini: {e}")
+        return ""
 
 def create_chord_in_drive(filename, content):
     """Cria um novo arquivo .txt no Drive e retorna o FileID."""
@@ -1240,7 +1267,8 @@ def render_song_database():
                     final_cifra_id = cifra_id_manual.strip() or ""
                     final_simpl_id = cifra_simpl_manual.strip() or ""
 
-                    # --- ORIGINAL ---
+                    
+                            # --- ORIGINAL ---
                     if uploaded_original:
                         if uploaded_original.type == "text/plain":
                             content_orig = uploaded_original.getvalue().decode(
@@ -1250,6 +1278,14 @@ def render_song_database():
                             content_orig = transcribe_image_with_gemini(
                                 uploaded_original
                             )
+
+                        # ⬇️ PREVIEW da cifra original
+                        st.text_area(
+                            "Prévia da cifra ORIGINAL gerada pelo Gemini",
+                            value=content_orig,
+                            height=200,
+                        )
+
                         nome_arquivo_orig = f"{title} - {artist} (Original)"
                         new_id = create_chord_in_drive(
                             nome_arquivo_orig, content_orig
@@ -1267,6 +1303,14 @@ def render_song_database():
                             content_simpl = transcribe_image_with_gemini(
                                 uploaded_simpl
                             )
+
+                        # ⬇️ PREVIEW da cifra simplificada
+                        st.text_area(
+                            "Prévia da cifra SIMPLIFICADA gerada pelo Gemini",
+                            value=content_simpl,
+                            height=200,
+                        )
+
                         nome_arquivo_simpl = f"{title} - {artist} (Simplificada)"
                         new_s_id = create_chord_in_drive(
                             nome_arquivo_simpl, content_simpl

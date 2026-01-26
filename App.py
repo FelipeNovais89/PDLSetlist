@@ -12,16 +12,16 @@ from googleapiclient.errors import HttpError
 
 import google.generativeai as genai  # GEMINI
 
-# --------------------------------------------------------------------
-# Helper para pegar a GEMINI_API_KEY em qualquer lugar do secrets
-# --------------------------------------------------------------------
+# ============================================================
+# 1. GEMINI – CONFIG
+# ============================================================
+
 def get_gemini_api_key():
+    """Tenta achar a chave em st.secrets ou em [sheets]."""
     try:
-        # 1) Topo do secrets.toml
         if "gemini_api_key" in st.secrets:
             return st.secrets["gemini_api_key"]
 
-        # 2) Dentro da seção [sheets]
         if "sheets" in st.secrets and "gemini_api_key" in st.secrets["sheets"]:
             return st.secrets["sheets"]["gemini_api_key"]
     except Exception:
@@ -30,41 +30,82 @@ def get_gemini_api_key():
 
 
 GEMINI_API_KEY = get_gemini_api_key()
+GEMINI_MODEL = "models/gemini-2.5-flash"   # modelo que funcionou pra você
+
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# --------------------------------------------------------------------
-# 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
-# --------------------------------------------------------------------
+
+def transcribe_image_with_gemini(uploaded_file) -> str:
+    """Recebe um arquivo de imagem e devolve o texto da cifra."""
+    api_key = get_gemini_api_key()
+    if not api_key:
+        st.error(
+            "Gemini API key não configurada. "
+            "Adicione 'gemini_api_key' no topo do secrets ou dentro de [sheets]."
+        )
+        return ""
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(GEMINI_MODEL)
+
+        prompt = """
+        Você vai transcrever uma CIFRA (acordes + letra) a partir de uma imagem.
+
+        REGRAS:
+        1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
+           Exemplo:  "| C   G7   C   G7"
+        2. Toda linha de LETRA (sem acordes) deve começar com um ESPAÇO em branco.
+           Exemplo: " Minha letra começa aqui"
+        3. Mantenha o alinhamento dos acordes exatamente acima das sílabas corretas.
+        4. Ignore diagramas de braço, cifras alternativas, legendas, etc.
+        5. NÃO use markdown, NÃO use ``` nem cabeçalhos; apenas texto puro.
+        """
+
+        mime = uploaded_file.type or "image/jpeg"
+        img_data = uploaded_file.getvalue()
+
+        response = model.generate_content(
+            [
+                prompt,
+                {"mime_type": mime, "data": img_data},
+            ]
+        )
+
+        text = (getattr(response, "text", "") or "").strip()
+
+        # Se vier embrulhado em ```txt ...
+        if text.startswith("```"):
+            text = text.strip("`")
+            if "\n" in text:
+                text = "\n".join(text.split("\n")[1:]).strip()
+
+        return text
+
+    except Exception as e:
+        st.error(f"Erro ao chamar Gemini: {e}")
+        return ""
+
+
+# ============================================================
+# 2. CONSTANTES / TRANSPOSIÇÃO
+# ============================================================
+
 NOTE_SEQ_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-NOTE_SEQ_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+NOTE_SEQ_FLAT  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 NOTE_TO_INDEX = {
-    "C": 0,
-    "C#": 1,
-    "Db": 1,
-    "D": 2,
-    "D#": 3,
-    "Eb": 3,
-    "E": 4,
-    "F": 5,
-    "F#": 6,
-    "Gb": 6,
-    "G": 7,
-    "G#": 8,
-    "Ab": 8,
-    "A": 9,
-    "A#": 10,
-    "Bb": 10,
-    "B": 11,
+    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4,
+    "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8,
+    "A": 9, "A#": 10, "Bb": 10, "B": 11,
 }
 
-# lista de tons (maiores + menores)
 _TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 TONE_OPTIONS = []
 for root in _TONE_BASES:
-    TONE_OPTIONS.append(root)        # maior
-    TONE_OPTIONS.append(root + "m")  # menor
+    TONE_OPTIONS.append(root)
+    TONE_OPTIONS.append(root + "m")
 
 
 def split_root_and_suffix(symbol: str):
@@ -112,17 +153,6 @@ def transpose_root(root: str, steps: int) -> str:
         scale = NOTE_SEQ_SHARP
 
     return scale[(idx + steps) % 12]
-
-
-def transpose_key_by_semitones(key: str, steps: int) -> str:
-    key = (key or "").strip()
-    if not key or steps == 0:
-        return key
-    root, suffix = split_root_and_suffix(key)
-    if not root:
-        return key
-    new_root = transpose_root(root, steps)
-    return new_root + suffix
 
 
 def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
@@ -176,75 +206,21 @@ def strip_chord_markers_for_display(text: str) -> str:
     return "\n".join(out)
 
 
-# --------------------------------------------------------------------
-# 1. GEMINI – TRANSCRIÇÃO DE CIFA (IMAGEM -> TEXTO)
-# --------------------------------------------------------------------
-def transcribe_image_with_gemini(uploaded_file) -> str:
-    """
-    Recebe um arquivo de imagem do Streamlit (UploadedFile),
-    chama o Gemini (models/gemini-2.5-flash) e devolve o texto da cifra.
+# ============================================================
+# 3. GOOGLE DRIVE – SERVIÇO E ARQUIVOS
+# ============================================================
 
-    Caso haja erro (quota, etc.), devolve string vazia.
-    """
-    api_key = get_gemini_api_key()
-    if not api_key:
-        st.error(
-            "Gemini API key não configurada. "
-            "Adicione 'gemini_api_key' no topo do secrets ou dentro de [sheets]."
-        )
-        return ""
-
-    model_name = "models/gemini-2.5-flash"
-
-    try:
-        model = genai.GenerativeModel(model_name)
-
-        prompt = """
-        Você vai transcrever uma cifra (acordes + letra) a partir de uma imagem.
-
-        REGRAS IMPORTANTES:
-        1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
-           Exemplo:  "| C    G7   C7   F"
-        2. Toda linha de LETRA (sem acordes) deve começar com UM espaço em branco.
-           Exemplo:  " Aquelas bocas me beijando..."
-        3. Mantenha o alinhamento dos acordes exatamente acima das sílabas da letra.
-        4. Ignore diagramas de braço, cifras desenhadas, títulos estilizados etc.
-           Foque apenas em texto (letra + acordes).
-        5. NÃO use markdown, NÃO use ``` nem cabeçalhos; apenas texto puro.
-        6. Se não tiver certeza de algum trecho, faça a melhor aproximação possível.
-        """
-
-        mime = uploaded_file.type or "image/jpeg"
-        img_data = uploaded_file.getvalue()
-
-        response = model.generate_content(
-            [
-                prompt,
-                {"mime_type": mime, "data": img_data},
-            ]
-        )
-
-        raw_text = (response.text or "").strip()
-
-        # Se por acaso vier em bloco de código markdown, limpa as crases
-        if raw_text.startswith("```"):
-            raw_text = raw_text.strip("`")
-            if "\n" in raw_text:
-                raw_text = "\n".join(raw_text.split("\n")[1:]).strip()
-
-        return raw_text
-
-    except Exception as e:
-        st.error(f"Erro ao chamar Gemini ({model_name}): {e}")
-        return ""
+def get_drive_service():
+    secrets = st.secrets["gcp_service_account"]
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
+    return build("drive", "v3", credentials=creds)
 
 
 def create_chord_in_drive(filename, content):
     """Cria um novo arquivo .txt no Drive e retorna o FileID."""
     try:
         service = get_drive_service()
-
-        # ID da pasta (opcional) nos secrets
         folder_id = st.secrets["sheets"].get("folder_id", None)
 
         file_metadata = {
@@ -268,14 +244,68 @@ def create_chord_in_drive(filename, content):
             .execute()
         )
         return file.get("id")
-    except Exception as e:
+    except HttpError as e:
         st.error(f"Erro no Drive: {e}")
+        return None
+    except Exception as e:
+        st.error(f"Erro inesperado no Drive: {e}")
         return None
 
 
-# --------------------------------------------------------------------
-# 2. GOOGLE SHEETS – CLIENTE E BANCO DE MÚSICAS (ABA 1)
-# --------------------------------------------------------------------
+@st.cache_data(ttl=120)
+def load_chord_from_drive(file_id: str) -> str:
+    if not file_id:
+        return ""
+
+    file_id = str(file_id).strip()
+
+    try:
+        service = get_drive_service()
+        request = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True,
+        )
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+        fh.seek(0)
+        return fh.read().decode("utf-8", errors="replace")
+
+    except HttpError as e:
+        return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
+
+
+def save_chord_to_drive(file_id: str, content: str):
+    if not file_id:
+        return
+
+    file_id = str(file_id).strip()
+
+    try:
+        service = get_drive_service()
+        fh = io.BytesIO(content.encode("utf-8"))
+        media = MediaIoBaseUpload(fh, mimetype="text/plain")
+
+        service.files().update(
+            fileId=file_id,
+            media_body=media,
+            supportsAllDrives=True,
+        ).execute()
+
+        load_chord_from_drive.clear()
+
+    except HttpError as e:
+        st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
+
+
+# ============================================================
+# 4. GOOGLE SHEETS – BANCO DE MÚSICAS
+# ============================================================
+
 def get_gspread_client():
     secrets = st.secrets["gcp_service_account"]
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -293,7 +323,7 @@ def get_spreadsheet():
 @st.cache_data(ttl=300)
 def load_songs_df():
     sh = get_spreadsheet()
-    ws = sh.sheet1  # primeira aba = banco de músicas
+    ws = sh.sheet1
 
     records = ws.get_all_records()
     if not records:
@@ -304,7 +334,7 @@ def load_songs_df():
                 "Tom_Original",
                 "BPM",
                 "CifraDriveID",
-                "CifraSimplificadaID",  # coluna F
+                "CifraSimplificadaID",
             ]
         )
     else:
@@ -347,9 +377,10 @@ def append_song_to_sheet(
     load_songs_df.clear()
 
 
-# --------------------------------------------------------------------
-# 3. GOOGLE SHEETS – UMA ABA POR SETLIST
-# --------------------------------------------------------------------
+# ============================================================
+# 5. GOOGLE SHEETS – SETLISTS (ABA POR SETLIST)
+# ============================================================
+
 SETLIST_COLS = [
     "BlockIndex",
     "BlockName",
@@ -557,77 +588,16 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
     st.session_state.screen = "editor"
 
 
-# --------------------------------------------------------------------
-# 4. GOOGLE DRIVE – CIFRAS .TXT
-# --------------------------------------------------------------------
-def get_drive_service():
-    secrets = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-    return build("drive", "v3", credentials=creds)
+# ============================================================
+# 6. ESTADO INICIAL
+# ============================================================
 
-
-@st.cache_data(ttl=120)
-def load_chord_from_drive(file_id: str) -> str:
-    if not file_id:
-        return ""
-
-    file_id = str(file_id).strip()
-
-    try:
-        service = get_drive_service()
-        request = service.files().get_media(
-            fileId=file_id,
-            supportsAllDrives=True,
-        )
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-
-        fh.seek(0)
-        return fh.read().decode("utf-8", errors="replace")
-
-    except HttpError as e:
-        return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
-
-
-def save_chord_to_drive(file_id: str, content: str):
-    if not file_id:
-        return
-
-    file_id = str(file_id).strip()
-
-    try:
-        service = get_drive_service()
-        fh = io.BytesIO(content.encode("utf-8"))
-        media = MediaIoBaseUpload(fh, mimetype="text/plain")
-
-        service.files().update(
-            fileId=file_id,
-            media_body=media,
-            supportsAllDrives=True,
-        ).execute()
-
-        load_chord_from_drive.clear()
-
-    except HttpError as e:
-        st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
-
-
-# --------------------------------------------------------------------
-# 5. ESTADO INICIAL
-# --------------------------------------------------------------------
 def init_state():
     if "songs_df" not in st.session_state:
         st.session_state.songs_df = load_songs_df()
 
     if "blocks" not in st.session_state:
-        st.session_state.blocks = [
-            {"name": "Bloco 1", "items": []}
-        ]
+        st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
 
     if "current_item" not in st.session_state:
         st.session_state.current_item = None
@@ -639,17 +609,19 @@ def init_state():
         st.session_state.cifra_font_size = 14
 
     if "screen" not in st.session_state:
-        st.session_state.screen = "home"  # tela inicial
+        st.session_state.screen = "home"
 
+    # campos de nova música (texto das cifras)
     if "new_song_cifra_original" not in st.session_state:
-        st.session_state.new_song_cifra_original = ""
+        st.session_state["new_song_cifra_original"] = ""
     if "new_song_cifra_simplificada" not in st.session_state:
-        st.session_state.new_song_cifra_simplificada = ""
+        st.session_state["new_song_cifra_simplificada"] = ""
 
 
-# --------------------------------------------------------------------
-# 6. RODAPÉ (PRÓXIMA / PAUSA / FIM DE BLOCO)
-# --------------------------------------------------------------------
+# ============================================================
+# 7. FOOTER / HTML – (iguais ao seu)
+# ============================================================
+
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     items = blocks[cur_block_idx]["items"]
 
@@ -667,9 +639,6 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     return "none", None
 
 
-# --------------------------------------------------------------------
-# 7. HTML (HEADER / FOOTER / PÁGINA)
-# --------------------------------------------------------------------
 def build_sheet_header_html(title, artist, tom, bpm):
     tom_display = tom if tom else "- / -"
     bpm_display = bpm if bpm not in (None, "", 0) else "BPM"
@@ -965,9 +934,10 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     """
 
 
-# --------------------------------------------------------------------
-# 8. EDITOR DE BLOCOS
-# --------------------------------------------------------------------
+# ============================================================
+# 8. EDITOR DE BLOCOS (igual ao seu, só omiti comentários)
+# ============================================================
+
 def move_item(block_idx, item_idx, direction):
     items = st.session_state.blocks[block_idx]["items"]
     new_idx = item_idx + direction
@@ -1022,7 +992,6 @@ def render_block_editor(block, block_idx, songs_df):
         with container:
             left, right = st.columns([8, 1.2])
 
-            # ---------------- COLUNA ESQUERDA ------------------------
             with left:
                 if item["type"] == "music":
                     title = item.get("title", "Nova música")
@@ -1032,7 +1001,6 @@ def render_block_editor(block, block_idx, songs_df):
                         label += f" – {artist}"
                     st.markdown(f"**{label}**")
 
-                    # Botão Simplificar / Original
                     use_simplificada = item.get("use_simplificada", False)
                     btn_label = "Original" if use_simplificada else "Simplificar"
                     if st.button(
@@ -1043,11 +1011,9 @@ def render_block_editor(block, block_idx, songs_df):
                         item["use_simplificada"] = not use_simplificada
                         st.rerun()
 
-                    # Ver / editar cifra
                     cifra_id = item.get("cifra_id", "")
                     cifra_simplificada_id = item.get("cifra_simplificada_id", "")
                     with st.expander("Ver cifra"):
-                        # Decide qual arquivo carregar (seguindo o mesmo critério do preview)
                         if use_simplificada and cifra_simplificada_id:
                             current_id = cifra_simplificada_id
                         elif cifra_id:
@@ -1096,7 +1062,6 @@ def render_block_editor(block, block_idx, songs_df):
                         )
 
                         if st.button("Salvar cifra", key=f"save_cifra_{block_idx}_{i}"):
-                            # Salva no arquivo correspondente (original ou simplificada)
                             if current_id:
                                 save_chord_to_drive(current_id, edited)
                                 st.success("Cifra atualizada no Drive.")
@@ -1107,12 +1072,10 @@ def render_block_editor(block, block_idx, songs_df):
                                 )
                             st.rerun()
 
-                    # ---- Linha BPM / TOM ----
                     bpm_val = item.get("bpm", "")
                     tom_original = item.get("tom_original", "") or item.get("tom", "")
                     tom_val = item.get("tom", tom_original)
 
-                    # Labels BPM / Tom
                     lab_bpm, lab_tom = st.columns([1, 1])
                     lab_bpm.markdown(
                         "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
@@ -1134,7 +1097,6 @@ def render_block_editor(block, block_idx, songs_df):
                     )
                     item["bpm"] = new_bpm
 
-                    # lista de tons: só maiores ou só menores
                     if tom_original.endswith("m"):
                         tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
                     else:
@@ -1163,7 +1125,6 @@ def render_block_editor(block, block_idx, songs_df):
                     label = f"⏸ PAUSA – {item.get('label','')}"
                     st.markdown(f"**{label}**")
 
-            # ---------------- COLUNA DIREITA (SETAS / EXCLUIR / PREVIEW) ----------------
             with right:
                 if st.button("⬆️", key=f"item_up_{block_idx}_{i}"):
                     move_item(block_idx, i, -1)
@@ -1180,7 +1141,6 @@ def render_block_editor(block, block_idx, songs_df):
 
         st.markdown("---")
 
-    # adicionar músicas / pausa
     add_col1, add_col2 = st.columns(2)
     if add_col1.button("+ Música", key=f"add_music_btn_{block_idx}"):
         st.session_state[f"show_add_music_{block_idx}"] = True
@@ -1222,17 +1182,18 @@ def render_block_editor(block, block_idx, songs_df):
             st.rerun()
 
 
-# --------------------------------------------------------------------
-# 9. BANCO DE MÚSICAS (DUAS CIFRAS + GEMINI)
-# --------------------------------------------------------------------
+# ============================================================
+# 9. BANCO DE MÚSICAS – TELA COM GEMINI + DRIVE + SHEETS
+# ============================================================
+
 def render_song_database():
     st.subheader("Banco de músicas (Google Sheets)")
 
     df = st.session_state.songs_df
     st.dataframe(df, use_container_width=True, height=240)
 
-    with st.expander("➕ Adicionar nova música ao banco", expanded=False):
-        st.markdown("### 1) Dados da música")
+    with st.expander("Adicionar nova música ao banco"):
+        st.markdown("#### 1) Informações básicas")
         col1, col2 = st.columns(2)
         with col1:
             title = st.text_input("Título")
@@ -1241,117 +1202,99 @@ def render_song_database():
             tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)")
             bpm = st.text_input("BPM")
 
-        st.markdown("---")
-        st.markdown("### 2) Arquivos de cifra (imagem ou .txt)")
-
-        col_orig, col_simpl = st.columns(2)
-
-        with col_orig:
-            st.markdown("**Cifra ORIGINAL**")
+        st.markdown("#### 2) Envie as cifras (imagem ou .txt)")
+        up1, up2 = st.columns(2)
+        with up1:
             uploaded_original = st.file_uploader(
-                "Suba imagem ou .txt da cifra ORIGINAL",
+                "Cifra ORIGINAL (imagem .jpg/.png ou .txt)",
                 type=["jpg", "jpeg", "png", "txt"],
                 key="upload_original",
             )
-            cifra_id_manual = st.text_input(
-                "Ou cole o ID do Drive da cifra ORIGINAL (opcional)",
-                key="cifra_id_manual",
+        with up2:
+            uploaded_simpl = st.file_uploader(
+                "Cifra SIMPLIFICADA (imagem .jpg/.png ou .txt, opcional)",
+                type=["jpg", "jpeg", "png", "txt"],
+                key="upload_simpl",
             )
 
-        with col_simpl:
-            st.markdown("**Cifra SIMPLIFICADA (opcional)**")
-            uploaded_simpl = st.file_uploader(
-                "Suba imagem ou .txt da cifra SIMPLIFICADA",
-                type=["jpg", "jpeg", "png", "txt"],
-                key="upload_simplificada",
+        st.markdown("#### 3) Transcrever com Gemini (para arquivos de imagem)")
+        if st.button("Transcrever cifra(s) com Gemini"):
+            if uploaded_original and uploaded_original.type != "text/plain":
+                txt = transcribe_image_with_gemini(uploaded_original)
+                if txt:
+                    st.session_state["new_song_cifra_original"] = txt
+            if uploaded_simpl and uploaded_simpl.type != "text/plain":
+                txt2 = transcribe_image_with_gemini(uploaded_simpl)
+                if txt2:
+                    st.session_state["new_song_cifra_simplificada"] = txt2
+            st.success("Transcrição concluída (se não estourou limite da API).")
+
+        st.markdown("#### 4) Revisar / editar cifras")
+        col_txt1, col_txt2 = st.columns(2)
+        with col_txt1:
+            st.text_area(
+                "Cifra ORIGINAL (edite se quiser)",
+                key="new_song_cifra_original",
+                height=300,
             )
+        with col_txt2:
+            st.text_area(
+                "Cifra SIMPLIFICADA (opcional)",
+                key="new_song_cifra_simplificada",
+                height=300,
+            )
+
+        st.markdown("#### 5) IDs já existentes no Drive (opcional)")
+        id1, id2 = st.columns(2)
+        with id1:
+            cifra_id_manual = st.text_input(
+                "ID do Drive da cifra ORIGINAL (se já existir)",
+                key="cifra_id_manual",
+            )
+        with id2:
             cifra_simpl_manual = st.text_input(
-                "Ou cole o ID do Drive da cifra SIMPLIFICADA (opcional)",
+                "ID do Drive da cifra SIMPLIFICADA (se já existir)",
                 key="cifra_simpl_manual",
             )
 
-        st.markdown("---")
-        st.markdown("### 3) Transcrever cifra a partir das imagens")
-
-        if st.button("Transcrever cifra(s) com Gemini"):
-            if not GEMINI_API_KEY:
-                st.error("Gemini API key não configurada em st.secrets.")
-            else:
-                with st.spinner("Chamando Gemini e montando as cifras..."):
-                    # ORIGINAL
-                    if uploaded_original is not None:
-                        if uploaded_original.type == "text/plain":
-                            text_orig = uploaded_original.getvalue().decode(
-                                "utf-8", errors="replace"
-                            )
-                        else:
-                            text_orig = transcribe_image_with_gemini(uploaded_original)
-                        st.session_state.new_song_cifra_original = text_orig
-
-                    # SIMPLIFICADA
-                    if uploaded_simpl is not None:
-                        if uploaded_simpl.type == "text/plain":
-                            text_simpl = uploaded_simpl.getvalue().decode(
-                                "utf-8", errors="replace"
-                            )
-                        else:
-                            text_simpl = transcribe_image_with_gemini(uploaded_simpl)
-                        st.session_state.new_song_cifra_simplificada = text_simpl
-
-                st.success("Transcrição concluída. Revise/edite as cifras abaixo.")
-                st.rerun()
-
-        st.markdown("### 4) Revisar / editar as cifras antes de salvar")
-
-        st.markdown("**Cifra ORIGINAL (edite se quiser):**")
-        st.text_area(
-            "Cifra ORIGINAL",
-            key="new_song_cifra_original",
-            height=260,
-            label_visibility="collapsed",
-        )
-
-        st.markdown("**Cifra SIMPLIFICADA (opcional, edite se quiser):**")
-        st.text_area(
-            "Cifra SIMPLIFICADA",
-            key="new_song_cifra_simplificada",
-            height=260,
-            label_visibility="collapsed",
-        )
-
-        st.markdown("---")
-        st.markdown("### 5) Salvar no banco (Drive + Google Sheets)")
-
-        if st.button("💾 Salvar no banco"):
+        st.markdown("#### 6) Salvar no banco (Drive + Google Sheets)")
+        if st.button("Salvar no banco"):
             if title.strip() == "":
-                st.warning("Preencha pelo menos o título da música.")
+                st.warning("Preencha pelo menos o título.")
             else:
-                with st.spinner("Criando arquivos no Drive e registrando no Sheets..."):
+                with st.spinner("Processando e salvando..."):
                     final_cifra_id = cifra_id_manual.strip() or ""
                     final_simpl_id = cifra_simpl_manual.strip() or ""
 
-                    texto_orig = st.session_state.new_song_cifra_original.strip()
-                    texto_simpl = st.session_state.new_song_cifra_simplificada.strip()
+                    # se não veio .txt direto, usamos o texto editado
+                    content_orig = ""
+                    if uploaded_original and uploaded_original.type == "text/plain":
+                        content_orig = uploaded_original.getvalue().decode("utf-8")
+                    else:
+                        content_orig = st.session_state["new_song_cifra_original"].strip()
 
-                    # Cria arquivo da cifra ORIGINAL, se tiver texto
-                    if texto_orig and not final_cifra_id:
+                    if content_orig and not final_cifra_id:
                         nome_arquivo_orig = f"{title} - {artist} (Original)"
-                        new_id = create_chord_in_drive(
-                            nome_arquivo_orig, texto_orig
-                        )
+                        new_id = create_chord_in_drive(nome_arquivo_orig, content_orig)
                         if new_id:
                             final_cifra_id = new_id
 
-                    # Cria arquivo da cifra SIMPLIFICADA, se tiver texto
-                    if texto_simpl and not final_simpl_id:
+                    content_simpl = ""
+                    if uploaded_simpl and uploaded_simpl.type == "text/plain":
+                        content_simpl = uploaded_simpl.getvalue().decode("utf-8")
+                    else:
+                        content_simpl = st.session_state[
+                            "new_song_cifra_simplificada"
+                        ].strip()
+
+                    if content_simpl and not final_simpl_id:
                         nome_arquivo_simpl = f"{title} - {artist} (Simplificada)"
                         new_s_id = create_chord_in_drive(
-                            nome_arquivo_simpl, texto_simpl
+                            nome_arquivo_simpl, content_simpl
                         )
                         if new_s_id:
                             final_simpl_id = new_s_id
 
-                    # Registra linha no Sheets
                     append_song_to_sheet(
                         title,
                         artist,
@@ -1361,18 +1304,15 @@ def render_song_database():
                         final_simpl_id,
                     )
 
-                    # Limpa o formulário de texto para próxima música
-                    st.session_state.new_song_cifra_original = ""
-                    st.session_state.new_song_cifra_simplificada = ""
+                    st.success(f"Música '{title}' cadastrada com sucesso!")
                     st.session_state.songs_df = load_songs_df()
-
-                st.success(f"Música '{title}' cadastrada com sucesso!")
-                st.rerun()
+                    st.rerun()
 
 
-# --------------------------------------------------------------------
-# 10. TELA INICIAL (HOME)
-# --------------------------------------------------------------------
+# ============================================================
+# 10. TELA INICIAL
+# ============================================================
+
 def render_home():
     st.title("PDL Setlist")
 
@@ -1412,9 +1352,10 @@ def render_home():
             )
 
 
-# --------------------------------------------------------------------
+# ============================================================
 # 11. MAIN
-# --------------------------------------------------------------------
+# ============================================================
+
 def main():
     st.set_page_config(
         page_title="PDL Setlist",
@@ -1428,7 +1369,6 @@ def main():
         render_home()
         return
 
-    # ---------------- EDITOR / PREVIEW -----------------
     top_left, top_right = st.columns([3, 1])
     with top_left:
         st.markdown(f"### Setlist: {st.session_state.setlist_name}")
@@ -1502,7 +1442,6 @@ def main():
                 current_block_name,
             )
 
-            # Folha adaptável à largura da coluna
             st.components.v1.html(html, height=1200, scrolling=True)
 
 

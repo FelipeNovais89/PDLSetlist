@@ -8,7 +8,7 @@ def get_gemini_api_key():
     """
     Procura pela chave em:
     - st.secrets["gemini_api_key"]
-    - st.secrets["sheets"]["gemini_api_key"] (se você quiser reaproveitar)
+    - st.secrets["sheets"]["gemini_api_key"]
     """
     try:
         if "gemini_api_key" in st.secrets:
@@ -20,29 +20,38 @@ def get_gemini_api_key():
     return None
 
 
-# Modelo multimodal que funciona bem com a API antiga
-GEMINI_MODEL_NAME = "gemini-pro-vision"
-GEMINI_API_KEY = get_gemini_api_key()
+API_KEY = get_gemini_api_key()
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+if API_KEY:
+    genai.configure(api_key=API_KEY)
 else:
-    st.warning(
+    st.error(
         "⚠️ Gemini API key não encontrada em st.secrets.\n\n"
         "No arquivo `.streamlit/secrets.toml`, coloque por exemplo:\n\n"
         "gemini_api_key = \"SUA_CHAVE_AQUI\""
     )
+    st.stop()
 
 
 # -------------------------------------------------------------
-# 2. FUNÇÃO DE TRANSCRIÇÃO (COM DEBUG)
+# 2. CARREGAR LISTA DE MODELOS DISPONÍVEIS
 # -------------------------------------------------------------
-def transcribe_image_with_gemini(uploaded_file):
-    if not GEMINI_API_KEY:
-        st.error("Gemini API key não configurada. Verifique o secrets.toml.")
-        return "", ""
+@st.cache_data(ttl=600, show_spinner=False)
+def get_models_with_generate_content():
+    all_models = list(genai.list_models())
+    usable = []
+    for m in all_models:
+        # alguns SDKs usam "generateContent", outros "generateText"
+        methods = getattr(m, "supported_generation_methods", []) or []
+        if "generateContent" in methods or "generateText" in methods:
+            usable.append(m)
+    return usable
 
-    # Info básica do arquivo
+
+# -------------------------------------------------------------
+# 3. FUNÇÃO DE TRANSCRIÇÃO (usa o modelo escolhido)
+# -------------------------------------------------------------
+def transcribe_image_with_gemini(uploaded_file, model_name: str):
     file_bytes = uploaded_file.getvalue()
     mime = uploaded_file.type or "image/jpeg"
 
@@ -52,7 +61,10 @@ def transcribe_image_with_gemini(uploaded_file):
     st.write("Tamanho (bytes):", len(file_bytes))
 
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        st.subheader("2️⃣ Chamando o Gemini")
+        st.write("Modelo selecionado:", model_name)
+
+        model = genai.GenerativeModel(model_name)
 
         prompt = """
         Você é especialista em transcrever cifras de cavaquinho/violão.
@@ -66,9 +78,6 @@ def transcribe_image_with_gemini(uploaded_file):
         6. Retorne SOMENTE o texto da cifra, sem explicações adicionais.
         """
 
-        st.subheader("2️⃣ Chamando o Gemini")
-        st.write("Modelo:", GEMINI_MODEL_NAME)
-
         response = model.generate_content(
             [
                 prompt,
@@ -80,18 +89,18 @@ def transcribe_image_with_gemini(uploaded_file):
 
         st.subheader("3️⃣ Resposta BRUTA do modelo")
         if raw_text:
-            st.code(raw_text[:2000], language="text")  # até 2000 chars
+            st.code(raw_text[:2000], language="text")
         else:
             st.info("Resposta vazia (string em branco).")
 
-        # --- Limpeza: remover ``` e possíveis cabeçalhos de código ---
+        # --- Limpeza de markdown / bloco de código ---
         cleaned = raw_text
         if cleaned.startswith("```"):
             cleaned = cleaned.strip("`")
             if "\n" in cleaned:
                 cleaned = "\n".join(cleaned.split("\n")[1:]).strip()
 
-        st.subheader("4️⃣ Texto LIMPO (p/ usar como cifra)")
+        st.subheader("4️⃣ Texto LIMPO (para usar como cifra)")
         if cleaned:
             st.code(cleaned, language="text")
         else:
@@ -100,20 +109,53 @@ def transcribe_image_with_gemini(uploaded_file):
         return raw_text, cleaned
 
     except Exception as e:
-        st.error(f"Erro ao chamar Gemini: {e}")
+        st.error(f"Erro ao chamar Gemini com o modelo '{model_name}': {e}")
         return "", ""
 
 
 # -------------------------------------------------------------
-# 3. APP STREAMLIT SIMPLES
+# 4. APP STREAMLIT
 # -------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Teste Gemini – Cifra por imagem", page_icon="🎵")
+    st.set_page_config(
+        page_title="Gemini – Teste de Cifra por Imagem",
+        page_icon="🎵",
+        layout="centered",
+    )
+
     st.title("Teste de Transcrição de Cifra com Gemini (Imagem ➜ Texto)")
 
-    if not GEMINI_API_KEY:
-        st.stop()
+    # ---- Lista de modelos disponíveis ----
+    st.markdown("### 🔍 Modelos disponíveis com `generateContent` / `generateText`")
 
+    try:
+        models = get_models_with_generate_content()
+    except Exception as e:
+        st.error(f"Erro ao listar modelos: {e}")
+        return
+
+    if not models:
+        st.error("Nenhum modelo com generateContent/generateText disponível para essa API key.")
+        return
+
+    # mostrar em tabela/expander
+    with st.expander("Ver lista completa de modelos"):
+        for m in models:
+            methods = getattr(m, "supported_generation_methods", []) or []
+            st.write(f"- **{m.name}** — métodos: {methods}")
+
+    # opções de selectbox: usar exatamente m.name
+    model_names = [m.name for m in models]
+
+    st.markdown("### 🎯 Escolha o modelo para testar")
+    selected_model = st.selectbox(
+        "Modelo",
+        options=model_names,
+        index=0,
+        help="Só modelos que suportam generateContent/generateText.",
+    )
+
+    st.markdown("---")
     st.markdown(
         """
         **Passos:**
@@ -130,7 +172,9 @@ def main():
 
     if uploaded_file is not None:
         if st.button("Transcrever cifra", type="primary"):
-            raw, cleaned = transcribe_image_with_gemini(uploaded_file)
+            raw, cleaned = transcribe_image_with_gemini(
+                uploaded_file, selected_model
+            )
 
             st.subheader("5️⃣ Área de edição / cópia da cifra")
             final_text = st.text_area(

@@ -3,7 +3,6 @@ import pandas as pd
 import io
 import re
 
-
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -30,22 +29,18 @@ def get_gemini_api_key():
     return None
 
 
+# Nome do modelo do Gemini
+GEMINI_MODEL_NAME = "gemini-1.5-pro"
+
 GEMINI_API_KEY = get_gemini_api_key()
 if GEMINI_API_KEY:
-    if GEMINI_API_KEY:
-    st.write("🔍 Listando modelos Gemini disponíveis...")
-    try:
-        for m in genai.list_models():
-            st.write("-", m.name)
-    except Exception as e:
-        st.write("Erro listando modelos:", e)
     genai.configure(api_key=GEMINI_API_KEY)
 
 # --------------------------------------------------------------------
 # 0. CONSTANTES E FUNÇÕES DE TRANSPOSIÇÃO
 # --------------------------------------------------------------------
 NOTE_SEQ_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-NOTE_SEQ_FLAT  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+NOTE_SEQ_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 NOTE_TO_INDEX = {
     "C": 0,
@@ -200,8 +195,7 @@ def transcribe_image_with_gemini(uploaded_file):
     st.write("🔍 Gemini – tipo de arquivo recebido:", uploaded_file.type)
 
     try:
-        # você pode usar "gemini-1.5-flash" ou "gemini-1.5-pro"
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 
         prompt = """
         Transcreva esta imagem de cifra para cavaquinho/violão.
@@ -233,9 +227,7 @@ def transcribe_image_with_gemini(uploaded_file):
 
         # Se vier como bloco de código markdown, limpamos
         if text.startswith("```"):
-            # remove os crases
             text = text.strip("`")
-            # às vezes vem "txt\n<conteúdo>"
             if "\n" in text:
                 text = "\n".join(text.split("\n")[1:]).strip()
 
@@ -246,6 +238,7 @@ def transcribe_image_with_gemini(uploaded_file):
     except Exception as e:
         st.error(f"Erro ao chamar Gemini: {e}")
         return ""
+
 
 def create_chord_in_drive(filename, content):
     """Cria um novo arquivo .txt no Drive e retorna o FileID."""
@@ -561,7 +554,7 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
 
     st.session_state.blocks = blocks
     st.session_state.setlist_name = setlist_name
-    st.session_state.current_item = None
+    st.session_state.current_item = None    # type: ignore
     st.session_state.screen = "editor"
 
 
@@ -1274,8 +1267,7 @@ def render_song_database():
                     final_cifra_id = cifra_id_manual.strip() or ""
                     final_simpl_id = cifra_simpl_manual.strip() or ""
 
-                    
-                            # --- ORIGINAL ---
+                    # --- ORIGINAL ---
                     if uploaded_original:
                         if uploaded_original.type == "text/plain":
                             content_orig = uploaded_original.getvalue().decode(

@@ -32,6 +32,13 @@ def get_gemini_api_key():
 
 GEMINI_API_KEY = get_gemini_api_key()
 if GEMINI_API_KEY:
+    if GEMINI_API_KEY:
+    st.write("🔍 Listando modelos Gemini disponíveis...")
+    try:
+        for m in genai.list_models():
+            st.write("-", m.name)
+    except Exception as e:
+        st.write("Erro listando modelos:", e)
     genai.configure(api_key=GEMINI_API_KEY)
 
 # --------------------------------------------------------------------

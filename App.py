@@ -1,6 +1,5 @@
 import streamlit as st
 import google.generativeai as genai
-import io
 
 # -------------------------------------------------------------
 # 1. PEGAR A CHAVE DO GEMINI EM st.secrets
@@ -21,7 +20,8 @@ def get_gemini_api_key():
     return None
 
 
-GEMINI_MODEL_NAME = "gemini-1.5-pro"
+# Modelo multimodal que funciona bem com a API antiga
+GEMINI_MODEL_NAME = "gemini-pro-vision"
 GEMINI_API_KEY = get_gemini_api_key()
 
 if GEMINI_API_KEY:
@@ -30,7 +30,6 @@ else:
     st.warning(
         "⚠️ Gemini API key não encontrada em st.secrets.\n\n"
         "No arquivo `.streamlit/secrets.toml`, coloque por exemplo:\n\n"
-        "[[exemplo]]\n"
         "gemini_api_key = \"SUA_CHAVE_AQUI\""
     )
 
@@ -81,7 +80,7 @@ def transcribe_image_with_gemini(uploaded_file):
 
         st.subheader("3️⃣ Resposta BRUTA do modelo")
         if raw_text:
-            st.code(raw_text[:2000], language="text")  # mostra até 2000 chars
+            st.code(raw_text[:2000], language="text")  # até 2000 chars
         else:
             st.info("Resposta vazia (string em branco).")
 

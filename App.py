@@ -356,8 +356,25 @@ def load_songs_df():
     sh = get_spreadsheet()
     ws = sh.sheet1  # primeira aba = banco de músicas
 
-    records = ws.get_all_records()
-    if not records:
+    try:
+        # Lê todas as células como matriz de strings
+        values = ws.get_all_values()
+    except Exception as e:
+        st.error(f"Erro ao ler planilha de músicas (get_all_values): {e!r}")
+        # volta um DF vazio com as colunas padrão
+        return pd.DataFrame(
+            columns=[
+                "Título",
+                "Artista",
+                "Tom_Original",
+                "BPM",
+                "CifraDriveID",
+                "CifraSimplificadaID",
+            ]
+        )
+
+    # Se a planilha estiver completamente vazia
+    if not values:
         df = pd.DataFrame(
             columns=[
                 "Título",
@@ -369,8 +386,24 @@ def load_songs_df():
             ]
         )
     else:
-        df = pd.DataFrame(records)
+        # Primeira linha = cabeçalho
+        header = values[0]
+        rows = values[1:]
 
+        n_cols = len(header)
+        norm_rows = []
+
+        # Garante que cada linha tenha o mesmo número de colunas do cabeçalho
+        for r in rows:
+            if len(r) < n_cols:
+                r = r + [""] * (n_cols - len(r))
+            elif len(r) > n_cols:
+                r = r[:n_cols]
+            norm_rows.append(r)
+
+        df = pd.DataFrame(norm_rows, columns=header)
+
+    # Garante que as colunas que o app espera existam
     for col in [
         "Título",
         "Artista",

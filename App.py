@@ -2,15 +2,17 @@ import streamlit as st
 import pandas as pd
 import io
 import re
+import base64
+import unicodedata
+import requests
 
-import gspread
 from google.oauth2.service_account import Credentials
-
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
 import google.generativeai as genai
+
 
 # ==============================================================
 # 1) GEMINI – API KEY
@@ -36,6 +38,120 @@ else:
         "Gemini API key não encontrada em st.secrets. "
         "Adicione 'gemini_api_key' no topo ou em [sheets]."
     )
+
+
+# ==============================================================
+# 1.1) GITHUB – CONFIG + HELPERS
+# ==============================================================
+
+def _sget(path, default=None):
+    try:
+        cur = st.secrets
+        for p in path:
+            cur = cur[p]
+        return cur
+    except Exception:
+        return default
+
+
+GITHUB_TOKEN = _sget(("github", "token"), None)
+GITHUB_OWNER = _sget(("github", "owner"), "FelipeNovais89")
+GITHUB_REPO = _sget(("github", "repo"), "PDLSetlist")
+GITHUB_BRANCH = _sget(("github", "branch"), "main")
+MUSIC_CSV_PATH = _sget(("github", "music_csv_path"), "Data/PDL_musicas.csv")
+SETLISTS_DIR = _sget(("github", "setlists_dir"), "Data/setlists")
+
+
+def github_headers():
+    h = {"Accept": "application/vnd.github+json"}
+    if GITHUB_TOKEN:
+        h["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return h
+
+
+def github_api_url(path: str) -> str:
+    path = path.strip("/")
+    return f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{path}"
+
+
+def github_raw_url(path: str) -> str:
+    path = path.strip("/")
+    return f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{path}"
+
+
+def github_get_file(path: str):
+    """Retorna (bytes, sha)."""
+    url = github_api_url(path)
+    r = requests.get(url, headers=github_headers(), params={"ref": GITHUB_BRANCH}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+
+    if data.get("type") != "file":
+        raise ValueError(f"Path não é arquivo: {path}")
+
+    sha = data.get("sha")
+    content_b64 = (data.get("content") or "").replace("\n", "")
+    content_bytes = base64.b64decode(content_b64) if content_b64 else b""
+    return content_bytes, sha
+
+
+def github_list_dir(dir_path: str):
+    """Lista arquivos dentro de uma pasta."""
+    url = github_api_url(dir_path)
+    r = requests.get(url, headers=github_headers(), params={"ref": GITHUB_BRANCH}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        raise ValueError("Diretório não retornou lista.")
+    return data
+
+
+def github_put_file(path: str, content_bytes: bytes, commit_message: str, sha: str | None = None):
+    """Cria/atualiza arquivo no GitHub (requer token com Contents write)."""
+    if not GITHUB_TOKEN:
+        raise PermissionError("Sem github.token no secrets.")
+
+    url = github_api_url(path)
+    payload = {
+        "message": commit_message,
+        "content": base64.b64encode(content_bytes).decode("utf-8"),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    r = requests.put(url, headers=github_headers(), json=payload, timeout=45)
+    r.raise_for_status()
+    return r.json()
+
+
+def slugify_filename(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        return "setlist"
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^a-zA-Z0-9\-_ ]+", "", name).strip().replace(" ", "_")
+    name = re.sub(r"_+", "_", name)
+    return name[:80] or "setlist"
+
+
+def ensure_columns(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df[cols]
+
+
+def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def csv_bytes_to_df(b: bytes) -> pd.DataFrame:
+    text = b.decode("utf-8", errors="replace")
+    return pd.read_csv(io.StringIO(text))
+
 
 # ==============================================================
 # 2) CONSTANTES – TRANSPOSIÇÃO
@@ -198,15 +314,15 @@ def transcribe_image_with_gemini(uploaded_file, model_name="models/gemini-2.5-fl
         model = genai.GenerativeModel(model_name)
 
         prompt = """
-        Você está transcrevendo uma cifra (acordes + letra) a partir de uma imagem.
+Você está transcrevendo uma cifra (acordes + letra) a partir de uma imagem.
 
-        REGRAS DE FORMATAÇÃO (IMPORTANTES):
-        1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
-        2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
-        3. Mantenha o alinhamento visual dos acordes exatamente acima das sílabas da letra.
-        4. Ignore diagramas de braço de instrumento; foque apenas em texto e acordes.
-        5. NÃO use markdown, NÃO use ``` e nem cabeçalhos; apenas texto puro.
-        """
+REGRAS DE FORMATAÇÃO (IMPORTANTES):
+1. Toda linha que contiver apenas ACORDES deve começar com o caractere '|'.
+2. Toda linha de LETRA deve começar com um ESPAÇO em branco.
+3. Mantenha o alinhamento visual dos acordes exatamente acima das sílabas da letra.
+4. Ignore diagramas de braço de instrumento; foque apenas em texto e acordes.
+5. NÃO use markdown, NÃO use ``` e nem cabeçalhos; apenas texto puro.
+"""
 
         mime = uploaded_file.type or "image/jpeg"
         img_data = uploaded_file.getvalue()
@@ -221,7 +337,6 @@ def transcribe_image_with_gemini(uploaded_file, model_name="models/gemini-2.5-fl
 
         text = (getattr(response, "text", "") or "").strip()
 
-        # Se vier encapsulado em bloco de código markdown
         if text.startswith("```"):
             text = text.strip("`")
             if "\n" in text:
@@ -334,112 +449,17 @@ def save_chord_to_drive(file_id: str, content: str):
 
 
 # ==============================================================
-# 5) GOOGLE SHEETS – BANCO DE MÚSICAS + SETLISTS
+# 5) BANCO (CSV NO GITHUB) – MÚSICAS + SETLISTS
 # ==============================================================
 
-def get_gspread_client():
-    secrets = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-    gc = gspread.authorize(creds)
-    return gc
-
-
-def get_spreadsheet():
-    gc = get_gspread_client()
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-    return gc.open_by_key(sheet_id)
-
-
-@st.cache_data(ttl=300)
-def load_songs_df():
-    sh = get_spreadsheet()
-    ws = sh.sheet1  # primeira aba = banco de músicas
-
-    try:
-        # Lê todas as células como matriz de strings
-        values = ws.get_all_values()
-    except Exception as e:
-        st.error(f"Erro ao ler planilha de músicas (get_all_values): {e!r}")
-        # volta um DF vazio com as colunas padrão
-        return pd.DataFrame(
-            columns=[
-                "Título",
-                "Artista",
-                "Tom_Original",
-                "BPM",
-                "CifraDriveID",
-                "CifraSimplificadaID",
-            ]
-        )
-
-    # Se a planilha estiver completamente vazia
-    if not values:
-        df = pd.DataFrame(
-            columns=[
-                "Título",
-                "Artista",
-                "Tom_Original",
-                "BPM",
-                "CifraDriveID",
-                "CifraSimplificadaID",
-            ]
-        )
-    else:
-        # Primeira linha = cabeçalho
-        header = values[0]
-        rows = values[1:]
-
-        n_cols = len(header)
-        norm_rows = []
-
-        # Garante que cada linha tenha o mesmo número de colunas do cabeçalho
-        for r in rows:
-            if len(r) < n_cols:
-                r = r + [""] * (n_cols - len(r))
-            elif len(r) > n_cols:
-                r = r[:n_cols]
-            norm_rows.append(r)
-
-        df = pd.DataFrame(norm_rows, columns=header)
-
-    # Garante que as colunas que o app espera existam
-    for col in [
-        "Título",
-        "Artista",
-        "Tom_Original",
-        "BPM",
-        "CifraDriveID",
-        "CifraSimplificadaID",
-    ]:
-        if col not in df.columns:
-            df[col] = ""
-
-    return df
-
-
-def append_song_to_sheet(
-    title: str,
-    artist: str,
-    tom_original: str,
-    bpm,
-    cifra_id: str,
-    cifra_simplificada_id: str,
-):
-    sh = get_spreadsheet()
-    ws = sh.sheet1
-    ws.append_row(
-        [
-            title,
-            artist,
-            tom_original,
-            bpm or "",
-            cifra_id or "",
-            cifra_simplificada_id or "",
-        ]
-    )
-    load_songs_df.clear()
-
+MUSIC_COLS = [
+    "Título",
+    "Artista",
+    "Tom_Original",
+    "BPM",
+    "CifraDriveID",
+    "CifraSimplificadaID",
+]
 
 SETLIST_COLS = [
     "BlockIndex",
@@ -457,56 +477,121 @@ SETLIST_COLS = [
 ]
 
 
-def list_setlist_names():
-    sh = get_spreadsheet()
-    worksheets = sh.worksheets()
-    setlists = [ws.title for ws in worksheets[1:]]  # sheet1 é banco
-    return setlists
-
-
-def get_or_create_setlist_ws(name: str):
-    sh = get_spreadsheet()
-    name = (name or "").strip() or "Setlist sem nome"
-
-    for ws in sh.worksheets():
-        if ws.title == name:
-            return ws
-
-    ws = sh.add_worksheet(title=name, rows=1000, cols=len(SETLIST_COLS))
-    ws.append_row(SETLIST_COLS)
-    return ws
-
-
-def load_setlist_df(name: str) -> pd.DataFrame:
-    sh = get_spreadsheet()
+@st.cache_data(ttl=120)
+def load_songs_df():
+    """
+    Lê o banco de músicas do GitHub CSV.
+    Se falhar (arquivo não existe), retorna vazio com colunas padrão.
+    """
     try:
-        ws = sh.worksheet(name)
-    except gspread.WorksheetNotFound:
-        df = pd.DataFrame(columns=SETLIST_COLS)
+        b, _sha = github_get_file(MUSIC_CSV_PATH)
+        df = csv_bytes_to_df(b)
+        df = ensure_columns(df, MUSIC_COLS)
         return df
-
-    records = ws.get_all_records()
-    if not records:
-        df = pd.DataFrame(columns=SETLIST_COLS)
-    else:
-        df = pd.DataFrame(records)
-
-    for col in SETLIST_COLS:
-        if col not in df.columns:
-            df[col] = ""
-
-    return df
+    except Exception:
+        return pd.DataFrame(columns=MUSIC_COLS)
 
 
-def write_setlist_df(name: str, df: pd.DataFrame):
-    ws = get_or_create_setlist_ws(name)
-    ws.clear()
-    ws.append_row(SETLIST_COLS)
-    if not df.empty:
-        ws.append_rows(df[SETLIST_COLS].values.tolist())
+def save_songs_df_to_github(df: pd.DataFrame):
+    """
+    Salva o banco de músicas no GitHub (commit).
+    """
+    df = ensure_columns(df, MUSIC_COLS)
+    csv_bytes = df_to_csv_bytes(df)
+
+    sha = None
+    try:
+        _b, sha = github_get_file(MUSIC_CSV_PATH)
+    except Exception:
+        sha = None
+
+    msg = "Atualiza banco de músicas (PDL_musicas.csv)"
+    github_put_file(MUSIC_CSV_PATH, csv_bytes, commit_message=msg, sha=sha)
+    load_songs_df.clear()
+
+
+def append_song_to_bank(
+    title: str,
+    artist: str,
+    tom_original: str,
+    bpm,
+    cifra_id: str,
+    cifra_simplificada_id: str,
+):
+    df = load_songs_df()
+    new_row = {
+        "Título": title,
+        "Artista": artist,
+        "Tom_Original": tom_original,
+        "BPM": bpm or "",
+        "CifraDriveID": cifra_id or "",
+        "CifraSimplificadaID": cifra_simplificada_id or "",
+    }
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    save_songs_df_to_github(df)
+
+
+@st.cache_data(ttl=120)
+def list_setlist_names():
+    """
+    Lista setlists como arquivos CSV dentro de Data/setlists.
+    Retorna lista de nomes “humanos” (sem extensão).
+    """
+    try:
+        items = github_list_dir(SETLISTS_DIR)
+        files = []
+        for it in items:
+            if it.get("type") == "file" and str(it.get("name", "")).lower().endswith(".csv"):
+                files.append(it.get("name"))
+        # remove extensão
+        return [f[:-4] for f in sorted(files)]
+    except Exception:
+        return []
+
+
+def setlist_path_from_name(setlist_name: str) -> str:
+    # usa slug para nome de arquivo; mas exibe o nome original na UI
+    filename = slugify_filename(setlist_name) + ".csv"
+    return f"{SETLISTS_DIR.strip('/')}/{filename}"
+
+
+@st.cache_data(ttl=120)
+def load_setlist_df(setlist_name: str) -> pd.DataFrame:
+    path = setlist_path_from_name(setlist_name)
+    try:
+        b, _sha = github_get_file(path)
+        df = csv_bytes_to_df(b)
+        df = ensure_columns(df, SETLIST_COLS)
+        return df
+    except Exception:
+        return pd.DataFrame(columns=SETLIST_COLS)
+
+
+def write_setlist_df(setlist_name: str, df: pd.DataFrame):
+    """
+    Salva a setlist no GitHub em Data/setlists/<slug>.csv
+    """
+    df = ensure_columns(df, SETLIST_COLS)
+    csv_bytes = df_to_csv_bytes(df)
+    path = setlist_path_from_name(setlist_name)
+
+    sha = None
+    try:
+        _b, sha = github_get_file(path)
+    except Exception:
+        sha = None
+
+    msg = f"Atualiza setlist: {setlist_name}"
+    github_put_file(path, csv_bytes, commit_message=msg, sha=sha)
+    list_setlist_names.clear()
+    load_setlist_df.clear()
 
 
 def save_current_setlist_to_sheet():
+    """
+    Mantive o nome da função para não mexer no resto do app,
+    mas agora ela salva no GitHub (CSV).
+    """
     name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
 
     blocks = st.session_state.blocks
@@ -536,9 +621,7 @@ def save_current_setlist_to_sheet():
                 base["BPM"] = item.get("bpm", "")
                 base["CifraDriveID"] = item.get("cifra_id", "")
                 base["CifraSimplificadaID"] = item.get("cifra_simplificada_id", "")
-                base["UseSimplificada"] = (
-                    "1" if item.get("use_simplificada", False) else "0"
-                )
+                base["UseSimplificada"] = "1" if item.get("use_simplificada", False) else "0"
             else:
                 base["PauseLabel"] = item.get("label", "Pausa")
 
@@ -562,49 +645,31 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
     df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
 
     blocks = []
-    for (block_idx, block_name), group in df_sel.groupby(
-        ["BlockIndex", "BlockName"], sort=True
-    ):
+    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
         items = []
         for _, row in group.iterrows():
             if row["ItemType"] == "pause":
-                items.append(
-                    {
-                        "type": "pause",
-                        "label": row.get("PauseLabel", "Pausa"),
-                    }
-                )
+                items.append({"type": "pause", "label": row.get("PauseLabel", "Pausa")})
             else:
                 title = row.get("SongTitle", "")
                 artist = row.get("Artist", "")
                 tom_saved = row.get("Tom", "")
                 bpm_saved = row.get("BPM", "")
                 cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
-                cifra_simplificada_saved = str(
-                    row.get("CifraSimplificadaID", "")
-                ).strip()
+                cifra_simplificada_saved = str(row.get("CifraSimplificadaID", "")).strip()
+
                 use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
-                use_simplificada = use_simplificada_saved in (
-                    "1",
-                    "true",
-                    "True",
-                    "Y",
-                    "y",
-                )
+                use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
 
                 song_row = songs_df[songs_df["Título"] == title]
                 if not song_row.empty:
                     song_row = song_row.iloc[0]
                     tom_original = song_row.get("Tom_Original", "") or tom_saved
                     cifra_id_bank = str(song_row.get("CifraDriveID", "")).strip()
-                    cifra_simplificada_bank = str(
-                        song_row.get("CifraSimplificadaID", "")
-                    ).strip()
+                    cifra_simplificada_bank = str(song_row.get("CifraSimplificadaID", "")).strip()
 
                     cifra_id = cifra_id_saved or cifra_id_bank
-                    cifra_simplificada_id = (
-                        cifra_simplificada_saved or cifra_simplificada_bank
-                    )
+                    cifra_simplificada_id = cifra_simplificada_saved or cifra_simplificada_bank
                 else:
                     tom_original = tom_saved
                     cifra_id = cifra_id_saved
@@ -625,12 +690,7 @@ def load_setlist_into_state(setlist_name: str, songs_df: pd.DataFrame):
                     }
                 )
 
-        blocks.append(
-            {
-                "name": block_name or f"Bloco {len(blocks) + 1}",
-                "items": items,
-            }
-        )
+        blocks.append({"name": block_name or f"Bloco {len(blocks) + 1}", "items": items})
 
     st.session_state.blocks = blocks
     st.session_state.setlist_name = setlist_name
@@ -663,13 +723,11 @@ def init_state():
     if "screen" not in st.session_state:
         st.session_state.screen = "home"
 
-    # seleção do modo árvore
     if "selected_block_idx" not in st.session_state:
         st.session_state.selected_block_idx = None
     if "selected_item_idx" not in st.session_state:
         st.session_state.selected_item_idx = None
 
-    # textos das novas músicas (banco)
     if "new_song_cifra_original" not in st.session_state:
         st.session_state.new_song_cifra_original = ""
     if "new_song_cifra_simplificada" not in st.session_state:
@@ -822,9 +880,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         elif cifra_id:
             raw_body = load_chord_from_drive(cifra_id)
         else:
-            raw_body = item.get(
-                "text", "CIFRA / TEXTO AQUI (ainda não cadastrada)."
-            )
+            raw_body = item.get("text", "CIFRA / TEXTO AQUI (ainda não cadastrada).")
+
         tom_atual = tom
 
     if item["type"] == "pause":
@@ -841,9 +898,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         next_artist = footer_next_item.get("artist", "")
         next_tone = footer_next_item.get("tom", "")
         next_bpm = footer_next_item.get("bpm", "")
-        footer_html = build_footer_next_music(
-            next_title, next_artist, next_tone, next_bpm
-        )
+        footer_html = build_footer_next_music(next_title, next_artist, next_tone, next_bpm)
     elif footer_mode == "next_pause" and footer_next_item is not None:
         label = footer_next_item.get("label", "Pausa")
         footer_html = build_footer_next_pause(label)
@@ -1026,7 +1081,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # ==============================================================
 
 def render_selected_item_editor():
-    """Form completo apenas para o item selecionado na árvore."""
     b_idx = st.session_state.get("selected_block_idx", None)
     i_idx = st.session_state.get("selected_item_idx", None)
 
@@ -1049,7 +1103,6 @@ def render_selected_item_editor():
     st.markdown("---")
     st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
 
-    # ---------- MÚSICA ----------
     if item["type"] == "music":
         title = item.get("title", "Nova música")
         artist = item.get("artist", "")
@@ -1059,11 +1112,7 @@ def render_selected_item_editor():
 
         use_simplificada = item.get("use_simplificada", False)
         btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
-        if st.button(
-            btn_label,
-            key=f"simpl_toggle_{b_idx}_{i_idx}",
-            help="Alternar entre cifra original e versão simplificada",
-        ):
+        if st.button(btn_label, key=f"simpl_toggle_{b_idx}_{i_idx}"):
             item["use_simplificada"] = not use_simplificada
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
@@ -1127,14 +1176,8 @@ def render_selected_item_editor():
         tom_val = item.get("tom", tom_original)
 
         lab_bpm, lab_tom = st.columns(2)
-        lab_bpm.markdown(
-            "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
-            unsafe_allow_html=True,
-        )
-        lab_tom.markdown(
-            "<p style='text-align:center;font-size:0.8rem;'>Tom</p>",
-            unsafe_allow_html=True,
-        )
+        lab_bpm.markdown("<p style='text-align:center;font-size:0.8rem;'>BPM</p>", unsafe_allow_html=True)
+        lab_tom.markdown("<p style='text-align:center;font-size:0.8rem;'>Tom</p>", unsafe_allow_html=True)
 
         col_bpm, col_tom = st.columns(2)
 
@@ -1155,10 +1198,7 @@ def render_selected_item_editor():
         if tom_val not in tone_list and tom_val:
             tone_list = [tom_val] + tone_list
 
-        if tom_val in tone_list:
-            idx_tone = tone_list.index(tom_val)
-        else:
-            idx_tone = 0
+        idx_tone = tone_list.index(tom_val) if tom_val in tone_list else 0
 
         selected_tone = col_tom.selectbox(
             "Tom",
@@ -1172,7 +1212,6 @@ def render_selected_item_editor():
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
 
-    # ---------- PAUSA ----------
     else:
         st.markdown("**⏸ Pausa**")
         new_label = st.text_input(
@@ -1184,16 +1223,13 @@ def render_selected_item_editor():
 
 
 def render_setlist_editor_tree():
-    """Estrutura em árvore: Setlist -> Blocos -> Músicas / Pausas."""
     blocks = st.session_state.blocks
     songs_df = st.session_state.songs_df
 
     st.markdown("### Estrutura da Setlist (modo árvore)")
 
     if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
-        st.session_state.blocks.append(
-            {"name": f"Bloco {len(blocks) + 1}", "items": []}
-        )
+        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
         st.rerun()
 
     for b_idx, block in enumerate(blocks):
@@ -1219,15 +1255,13 @@ def render_setlist_editor_tree():
 
             st.markdown("---")
 
-            # Itens dentro do bloco
             for i, item in enumerate(block["items"]):
                 col_label, col_btns = st.columns([8, 2])
+
                 if item["type"] == "music":
                     title = item.get("title", "Nova música")
                     artist = item.get("artist", "")
-                    label = f"🎵 {title}"
-                    if artist:
-                        label += f" – {artist}"
+                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
                 else:
                     label = f"⏸ {item.get('label', 'Pausa')}"
 
@@ -1273,9 +1307,7 @@ def render_setlist_editor_tree():
                     for title in selected:
                         row = songs_df[songs_df["Título"] == title].iloc[0]
                         cifra_id = str(row.get("CifraDriveID", "")).strip()
-                        cifra_simplificada_id = str(
-                            row.get("CifraSimplificadaID", "")
-                        ).strip()
+                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
                         new_item = {
                             "type": "music",
                             "title": row.get("Título", ""),
@@ -1288,7 +1320,6 @@ def render_setlist_editor_tree():
                             "use_simplificada": False,
                             "text": "",
                         }
-                            # append
                         block["items"].append(new_item)
 
                     st.session_state[f"show_add_music_block_{b_idx}"] = False
@@ -1302,7 +1333,7 @@ def render_setlist_editor_tree():
 # ==============================================================
 
 def render_song_database():
-    st.subheader("Banco de músicas (Google Sheets)")
+    st.subheader("Banco de músicas (CSV no GitHub)")
 
     df = st.session_state.songs_df
     st.dataframe(df, use_container_width=True, height=240)
@@ -1318,7 +1349,6 @@ def render_song_database():
 
         st.markdown("---")
 
-        # -------- Cifra ORIGINAL --------
         st.markdown("#### 1) Cifra ORIGINAL")
         up_orig = st.file_uploader(
             "Opcional: envie uma imagem (.jpg/.png) ou .txt da cifra original",
@@ -1339,10 +1369,7 @@ def render_song_database():
                     st.session_state.new_song_cifra_original = text
 
         with col_tr_o2:
-            st.caption(
-                "Use esse botão apenas se tiver subido uma imagem. "
-                "O resultado aparecerá abaixo para você editar."
-            )
+            st.caption("Use esse botão apenas se tiver subido uma imagem. O resultado aparece abaixo para editar.")
 
         st.session_state.new_song_cifra_original = st.text_area(
             "Texto da cifra ORIGINAL",
@@ -1353,7 +1380,6 @@ def render_song_database():
 
         st.markdown("---")
 
-        # -------- Cifra SIMPLIFICADA --------
         st.markdown("#### 2) Cifra SIMPLIFICADA (opcional)")
         up_simpl = st.file_uploader(
             "Opcional: envie uma imagem (.jpg/.png) ou .txt da cifra simplificada",
@@ -1374,9 +1400,7 @@ def render_song_database():
                     st.session_state.new_song_cifra_simplificada = text_s
 
         with col_tr_s2:
-            st.caption(
-                "Também opcional. Se não usar, deixe em branco."
-            )
+            st.caption("Também opcional. Se não usar, deixe em branco.")
 
         st.session_state.new_song_cifra_simplificada = st.text_area(
             "Texto da cifra SIMPLIFICADA",
@@ -1386,13 +1410,15 @@ def render_song_database():
         )
 
         st.markdown("---")
-        st.markdown("#### 3) Salvar no banco (Drive + Sheets)")
+        st.markdown("#### 3) Salvar no banco (Drive + GitHub CSV)")
 
         if st.button("Salvar nova música no banco", key="btn_save_new_song"):
             if not title.strip():
                 st.warning("Preencha pelo menos o título.")
+            elif not GITHUB_TOKEN:
+                st.error("Para salvar no GitHub, configure [github].token no secrets.")
             else:
-                with st.spinner("Criando arquivos no Drive e salvando no Sheets..."):
+                with st.spinner("Criando arquivos no Drive e salvando no GitHub..."):
                     content_orig = st.session_state.new_song_cifra_original or ""
                     content_simpl = st.session_state.new_song_cifra_simplificada or ""
 
@@ -1401,30 +1427,25 @@ def render_song_database():
 
                     if content_orig.strip():
                         nome_arquivo_orig = f"{title} - {artist} (Original)"
-                        new_id = create_chord_in_drive(nome_arquivo_orig, content_orig)
-                        final_cifra_id = new_id or ""
+                        final_cifra_id = create_chord_in_drive(nome_arquivo_orig, content_orig) or ""
 
                     if content_simpl.strip():
                         nome_arquivo_simpl = f"{title} - {artist} (Simplificada)"
-                        new_s_id = create_chord_in_drive(
-                            nome_arquivo_simpl, content_simpl
-                        )
-                        final_simpl_id = new_s_id or ""
+                        final_simpl_id = create_chord_in_drive(nome_arquivo_simpl, content_simpl) or ""
 
-                    append_song_to_sheet(
-                        title,
-                        artist,
-                        tom_original,
+                    append_song_to_bank(
+                        title.strip(),
+                        artist.strip(),
+                        tom_original.strip(),
                         bpm,
                         final_cifra_id,
                         final_simpl_id,
                     )
 
-                    # limpa textos
                     st.session_state.new_song_cifra_original = ""
                     st.session_state.new_song_cifra_simplificada = ""
 
-                    st.success(f"Música '{title}' cadastrada com sucesso!")
+                    st.success(f"Música '{title}' cadastrada com sucesso no GitHub ✅")
                     st.session_state.songs_df = load_songs_df()
                     st.rerun()
 
@@ -1444,7 +1465,7 @@ def render_home():
         st.subheader("Nova setlist")
         default_name = st.session_state.get("setlist_name", "Pagode do LEC")
         new_name = st.text_input(
-            "Nome da nova setlist (nome da aba)",
+            "Nome da nova setlist (salva como arquivo CSV)",
             value=default_name,
             key="new_setlist_name",
         )
@@ -1458,10 +1479,10 @@ def render_home():
             st.rerun()
 
     with col_load:
-        st.subheader("Carregar setlist existente")
+        st.subheader("Carregar setlist existente (GitHub)")
         if setlists:
             selected = st.selectbox(
-                "Escolha a setlist (aba)",
+                "Escolha a setlist",
                 options=setlists,
                 key="load_setlist_select",
             )
@@ -1469,9 +1490,7 @@ def render_home():
                 load_setlist_into_state(selected, st.session_state.songs_df)
                 st.rerun()
         else:
-            st.info(
-                "Nenhuma aba de setlist encontrada (apenas a primeira é o banco de músicas)."
-            )
+            st.info("Nenhuma setlist encontrada em Data/setlists/.")
 
 
 # ==============================================================
@@ -1479,11 +1498,19 @@ def render_home():
 # ==============================================================
 
 def main():
-    st.set_page_config(
-        page_title="PDL Setlist",
-        layout="wide",
-        page_icon="🎵",
-    )
+    st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
+
+    with st.sidebar:
+        st.caption("Status GitHub")
+        st.write("Repo:", f"{GITHUB_OWNER}/{GITHUB_REPO}@{GITHUB_BRANCH}")
+        st.write("Banco:", MUSIC_CSV_PATH)
+        st.write("Setlists dir:", SETLISTS_DIR)
+        st.write("Token:", "✅ OK" if GITHUB_TOKEN else "❌ faltando (não salva)")
+        if st.button("🔄 Recarregar banco (limpar cache)", use_container_width=True):
+            load_songs_df.clear()
+            list_setlist_names.clear()
+            load_setlist_df.clear()
+            st.rerun()
 
     init_state()
 
@@ -1495,7 +1522,7 @@ def main():
     with top_left:
         st.markdown(f"### Setlist: {st.session_state.setlist_name}")
         st.session_state.setlist_name = st.text_input(
-            "Nome do setlist (também será o nome da aba)",
+            "Nome do setlist",
             value=st.session_state.setlist_name,
             label_visibility="collapsed",
         )
@@ -1503,17 +1530,18 @@ def main():
         if st.button("🏠 Voltar à tela inicial", use_container_width=True):
             st.session_state.screen = "home"
             st.rerun()
-        if st.button("💾 Salvar setlist (aba)", use_container_width=True):
-            save_current_setlist_to_sheet()
-            st.success("Setlist salva na aba correspondente do Google Sheets.")
+        if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):
+            if not GITHUB_TOKEN:
+                st.error("Para salvar setlist no GitHub, configure [github].token no secrets.")
+            else:
+                save_current_setlist_to_sheet()
+                st.success("Setlist salva no GitHub ✅")
 
     left_col, right_col = st.columns([1.1, 1])
 
     with left_col:
         st.subheader("Editor de Setlist (modo árvore)")
-
         render_setlist_editor_tree()
-
         st.markdown("---")
         render_song_database()
 
@@ -1548,9 +1576,7 @@ def main():
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
-            footer_mode, footer_next_item = get_footer_context(
-                blocks, cur_block_idx, cur_item_idx
-            )
+            footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)
 
             html = build_sheet_page_html(
                 current_item,
@@ -1558,7 +1584,6 @@ def main():
                 footer_next_item,
                 current_block_name,
             )
-
             st.components.v1.html(html, height=1200, scrolling=True)
 
 

@@ -1297,15 +1297,73 @@ def render_setlist_editor_tree():
 
             if st.session_state.get(f"show_add_music_block_{b_idx}", False):
                 st.markdown("##### Adicionar músicas deste bloco")
-                all_titles = list(songs_df["Título"])
-                selected = st.multiselect(
-                    "Escolha as músicas do banco",
-                    options=all_titles,
-                    key=f"mus_select_blk_{b_idx}",
-                )
-                if st.button("Adicionar selecionadas", key=f"confirm_add_mus_blk_{b_idx}"):
-                    for title in selected:
-                        row = songs_df[songs_df["Título"] == title].iloc[0]
+                st.markdown("##### Adicionar músicas deste bloco")
+
+# 1) Garante que DF tem as colunas esperadas (caso CSV venha diferente)
+for col in ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]:
+    if col not in songs_df.columns:
+        songs_df[col] = ""
+
+# 2) Normaliza strings e cria uma "key" única por linha
+df_opt = songs_df.copy()
+
+df_opt["Título"] = df_opt["Título"].astype(str).fillna("").str.strip()
+df_opt["Artista"] = df_opt["Artista"].astype(str).fillna("").str.strip()
+df_opt["Tom_Original"] = df_opt["Tom_Original"].astype(str).fillna("").str.strip()
+df_opt["BPM"] = df_opt["BPM"].astype(str).fillna("").str.strip()
+
+# remove linhas totalmente sem título (isso é o que vira "opção em branco")
+df_opt = df_opt[df_opt["Título"] != ""].copy()
+
+# chave única (string) -> evita problema com índices não-serializáveis
+df_opt["_key"] = df_opt.index.astype(str)
+
+# label que aparece no dropdown
+def _label_for_key(k: str) -> str:
+    r = df_opt.loc[int(k)] if k.isdigit() else df_opt.iloc[0]
+    title = r.get("Título", "")
+    artist = r.get("Artista", "")
+    tom = r.get("Tom_Original", "")
+    bpm = r.get("BPM", "")
+    extra = []
+    if tom: extra.append(tom)
+    if bpm and bpm.lower() != "none": extra.append(f"{bpm} BPM")
+    extra_txt = f" ({' / '.join(extra)})" if extra else ""
+    if artist:
+        return f"{title} — {artist}{extra_txt}"
+    return f"{title}{extra_txt}"
+
+# 3) multiselect usando keys + format_func para exibir label
+selected_keys = st.multiselect(
+    "Escolha as músicas do banco",
+    options=df_opt["_key"].tolist(),
+    format_func=_label_for_key,
+    key=f"mus_select_blk_{b_idx}",
+)
+
+if st.button("Adicionar selecionadas", key=f"confirm_add_mus_blk_{b_idx}"):
+    for k in selected_keys:
+        row = df_opt.loc[int(k)]
+
+        cifra_id = str(row.get("CifraDriveID", "")).strip()
+        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
+
+        new_item = {
+            "type": "music",
+            "title": row.get("Título", ""),
+            "artist": row.get("Artista", ""),
+            "tom_original": row.get("Tom_Original", ""),
+            "tom": row.get("Tom_Original", ""),
+            "bpm": row.get("BPM", ""),
+            "cifra_id": cifra_id,
+            "cifra_simplificada_id": cifra_simplificada_id,
+            "use_simplificada": False,
+            "text": "",
+        }
+        block["items"].append(new_item)
+
+    st.session_state[f"show_add_music_block_{b_idx}"] = False
+    st.rerun()
                         cifra_id = str(row.get("CifraDriveID", "")).strip()
                         cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
                         new_item = {

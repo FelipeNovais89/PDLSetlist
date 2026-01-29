@@ -64,18 +64,26 @@ if GEMINI_API_KEY and genai is not None:
 
 
 # ==============================================================
-# 2) CONSTANTES – TRANSPOSIÇÃO (mantido, mas não é obrigatório)
+# 2) CONSTANTES + TRANSPOSIÇÃO REAL DA CIFRA
 # ==============================================================
 
+import re
+
+# -----------------------------
+# Sequências de notas
+# -----------------------------
 NOTE_SEQ_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 NOTE_SEQ_FLAT  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 NOTE_TO_INDEX = {
     "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4,
-    "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8, "A": 9,
-    "A#": 10, "Bb": 10, "B": 11,
+    "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8,
+    "A": 9, "A#": 10, "Bb": 10, "B": 11,
 }
 
+# -----------------------------
+# Lista de tons (para UI)
+# -----------------------------
 _TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 TONE_OPTIONS = []
 for r in _TONE_BASES:
@@ -83,8 +91,14 @@ for r in _TONE_BASES:
     TONE_OPTIONS.append(r + "m")
 
 
+# ==============================================================
+# AUX: exibição da cifra (remove "|")
+# ==============================================================
+
 def strip_chord_markers_for_display(text: str) -> str:
-    """Remove o marcador '|' das linhas de acorde (só para exibir)."""
+    """
+    Remove o marcador '|' das linhas de acorde (apenas para exibição).
+    """
     lines = (text or "").splitlines()
     out = []
     for line in lines:
@@ -93,6 +107,138 @@ def strip_chord_markers_for_display(text: str) -> str:
         else:
             out.append(line)
     return "\n".join(out)
+
+
+# ==============================================================
+# TRANSPOSIÇÃO REAL DE ACORDES
+# ==============================================================
+
+def _split_root_and_suffix(chord: str):
+    """
+    Divide um acorde em:
+      - root (C, C#, Db, etc)
+      - suffix (m7, 7(9), sus4, /G, etc)
+    """
+    chord = (chord or "").strip()
+    if not chord:
+        return "", ""
+
+    m = re.match(r"^([A-G])([#b]?)(.*)$", chord)
+    if not m:
+        return chord, ""
+
+    root = m.group(1) + (m.group(2) or "")
+    suffix = m.group(3) or ""
+    return root, suffix
+
+
+def _prefer_flats(tone: str) -> bool:
+    """
+    Decide se deve usar bemóis (Db, Eb, Bb) em vez de sustenidos.
+    """
+    t = (tone or "").strip()
+    if "b" in t:
+        return True
+
+    flat_keys = {
+        "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb",
+        "Fm", "Bbm", "Ebm", "Abm", "Dbm", "Gbm", "Cbm",
+    }
+    return t in flat_keys
+
+
+def _semitone_diff(from_tone: str, to_tone: str) -> int:
+    """
+    Calcula diferença em semitons (to - from), ignorando 'm'.
+    """
+    a = (from_tone or "").strip()
+    b = (to_tone or "").strip()
+
+    if a.endswith("m"):
+        a = a[:-1]
+    if b.endswith("m"):
+        b = b[:-1]
+
+    if a not in NOTE_TO_INDEX or b not in NOTE_TO_INDEX:
+        return 0
+
+    return (NOTE_TO_INDEX[b] - NOTE_TO_INDEX[a]) % 12
+
+
+def _transpose_root(root: str, delta: int, use_flats: bool) -> str:
+    """
+    Transpõe apenas a nota fundamental do acorde.
+    """
+    root = (root or "").strip()
+    if not root or root not in NOTE_TO_INDEX:
+        return root
+
+    idx = NOTE_TO_INDEX[root]
+    new_idx = (idx + delta) % 12
+    return (NOTE_SEQ_FLAT if use_flats else NOTE_SEQ_SHARP)[new_idx]
+
+
+def transpose_chord_symbol(chord: str, delta: int, use_flats: bool) -> str:
+    """
+    Transpõe um acorde completo:
+      C/E, F#m7(b5), G7(13), etc
+    """
+    chord = (chord or "").strip()
+    if not chord:
+        return chord
+
+    # Slash chord (baixo)
+    if "/" in chord:
+        main, bass = chord.split("/", 1)
+        main_t = transpose_chord_symbol(main, delta, use_flats)
+
+        bass_root, bass_suf = _split_root_and_suffix(bass)
+        bass_t = _transpose_root(bass_root, delta, use_flats) + (bass_suf or "")
+
+        return f"{main_t}/{bass_t}"
+
+    root, suffix = _split_root_and_suffix(chord)
+    new_root = _transpose_root(root, delta, use_flats)
+    return new_root + (suffix or "")
+
+
+def transpose_chord_text(text: str, from_tone: str, to_tone: str) -> str:
+    """
+    Transpõe a cifra inteira respeitando o formato:
+      - Linhas de acordes começam com '|'
+      - Apenas essas linhas são transpostas
+    """
+    if not text:
+        return ""
+
+    delta = _semitone_diff(from_tone, to_tone)
+    if delta == 0:
+        return text
+
+    use_flats = _prefer_flats(to_tone)
+
+    lines = text.splitlines()
+    out_lines = []
+
+    for line in lines:
+        if line.startswith("|"):
+            raw = line[1:]
+            parts = re.split(r"(\s+)", raw)  # preserva espaçamento
+            new_parts = []
+
+            for p in parts:
+                if not p or p.isspace():
+                    new_parts.append(p)
+                elif re.match(r"^[A-G][#b]?", p):
+                    new_parts.append(transpose_chord_symbol(p, delta, use_flats))
+                else:
+                    new_parts.append(p)
+
+            out_lines.append("|" + "".join(new_parts))
+        else:
+            out_lines.append(line)
+
+    return "\n".join(out_lines)
 
 
 # ==============================================================
@@ -694,7 +840,7 @@ def render_selected_item_editor():
 
 
 # ==============================================================
-# 11) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + selectbox mobile
+# 11) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + BPM/Tom visíveis
 # ==============================================================
 
 def render_setlist_editor_tree():
@@ -708,7 +854,10 @@ def render_setlist_editor_tree():
         st.rerun()
 
     for b_idx, block in enumerate(blocks):
-        with st.expander(f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}", expanded=False):
+        with st.expander(
+            f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}",
+            expanded=False
+        ):
             name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
 
             block["name"] = name_col.text_input(
@@ -730,14 +879,34 @@ def render_setlist_editor_tree():
 
             st.markdown("---")
 
-            # itens
+            # ==========================================================
+            # ITENS DO BLOCO (✅ BPM/Tom sempre visíveis na linha)
+            # ==========================================================
             for i, item in enumerate(block.get("items", [])):
                 col_label, col_btns = st.columns([8, 2])
 
                 if item.get("type") == "music":
-                    title = item.get("title", "Nova música")
-                    artist = item.get("artist", "")
-                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
+                    title = (item.get("title") or "Nova música").strip()
+                    artist = (item.get("artist") or "").strip()
+                    tom = (item.get("tom") or item.get("tom_original") or "").strip()
+                    bpm = (item.get("bpm") or "").strip()
+
+                    # ✅ texto do label com BPM/Tom visíveis
+                    label_main = f"🎵 {title}"
+                    if artist:
+                        label_main += f" – {artist}"
+
+                    meta = []
+                    if tom:
+                        meta.append(f"Tom: {tom}")
+                    if bpm:
+                        meta.append(f"BPM: {bpm}")
+
+                    if meta:
+                        label = label_main + "  ·  " + " | ".join(meta)
+                    else:
+                        label = label_main
+
                 else:
                     label = f"⏸ {item.get('label', 'Pausa')}"
 
@@ -749,6 +918,7 @@ def render_setlist_editor_tree():
 
                 with col_btns:
                     cu, cd, cx, cp = st.columns(4)
+
                     if cu.button("↑", key=f"it_up_{b_idx}_{i}"):
                         move_item(b_idx, i, -1)
                         st.rerun()
@@ -764,6 +934,9 @@ def render_setlist_editor_tree():
 
             st.markdown("---")
 
+            # ==========================================================
+            # ADD MÚSICA / PAUSA
+            # ==========================================================
             col_add_mus, col_add_pause = st.columns(2)
             if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}"):
                 st.session_state[f"show_add_music_block_{b_idx}"] = True
@@ -771,7 +944,9 @@ def render_setlist_editor_tree():
                 block["items"].append({"type": "pause", "label": "Pausa"})
                 st.rerun()
 
-            # add música (mobile-safe)
+            # ==========================================================
+            # ADD MÚSICA (mobile-safe selectbox)
+            # ==========================================================
             if st.session_state.get(f"show_add_music_block_{b_idx}", False):
                 st.markdown("##### Adicionar músicas deste bloco")
 
@@ -787,12 +962,12 @@ def render_setlist_editor_tree():
                     if not titulo:
                         continue
 
-                    label = f"{titulo} – {artista}" if artista else titulo
+                    label_opt = f"{titulo} – {artista}" if artista else titulo
                     if tom:
-                        label += f" ({tom})"
+                        label_opt += f" ({tom})"
 
-                    options.append(label)
-                    idx_map[label] = int(idx)
+                    options.append(label_opt)
+                    idx_map[label_opt] = int(idx)
 
                 if not options:
                     st.warning("Banco de músicas vazio (ou coluna 'Título' está vazia).")
@@ -831,6 +1006,7 @@ def render_setlist_editor_tree():
                         st.session_state[f"show_add_music_block_{b_idx}"] = False
                         st.rerun()
 
+    # Editor do item selecionado (fora do loop)
     render_selected_item_editor()
 
 
@@ -938,7 +1114,7 @@ def render_song_database():
 
 
 # ==============================================================
-# 13) PREVIEW (HTML simples)
+# 13) PREVIEW (HTML simples) — ✅ com transposição real da cifra
 # ==============================================================
 
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
@@ -962,23 +1138,57 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    title = (item.get("title", "") if item.get("type") == "music" else item.get("label", "Pausa")) or ""
-    artist = item.get("artist", "") if item.get("type") == "music" else ""
-    bpm = item.get("bpm", "") if item.get("type") == "music" else ""
-    tom = item.get("tom", "") if item.get("type") == "music" else ""
+    """
+    Monta o HTML do preview.
+    ✅ Agora: transpõe a cifra de verdade com base em item['tom_original'] -> item['tom'].
+    Regras:
+      - Só transpõe linhas que começam com '|'
+      - Remove '|' apenas na exibição (mantém o TXT original intacto)
+    """
+    is_music = (item.get("type") == "music")
 
-    # cifra
+    title = (item.get("title", "") if is_music else item.get("label", "Pausa")) or ""
+    artist = item.get("artist", "") if is_music else ""
+    bpm = item.get("bpm", "") if is_music else ""
+    tom = item.get("tom", "") if is_music else ""
+    tom_original = item.get("tom_original", "") if is_music else ""
+
+    # -----------------------------
+    # 1) Carrega cifra (Drive ou texto do item)
+    # -----------------------------
     cifra_txt = ""
-    if item.get("type") == "music":
+    if is_music:
         use_s = item.get("use_simplificada", False)
         cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
         cid = str(cid).strip()
+
         if cid:
             cifra_txt = load_chord_from_drive(cid)
         else:
             cifra_txt = item.get("text", "")
-    cifra_show = strip_chord_markers_for_display(cifra_txt)
 
+    # -----------------------------
+    # 2) Transpõe a cifra (REAL)
+    # -----------------------------
+    cifra_transposed = cifra_txt
+    if is_music:
+        # fallback: se tom_original vier vazio, tenta usar o tom atual como "original" (não transpõe)
+        from_tone = (tom_original or tom or "").strip()
+        to_tone = (tom or "").strip()
+
+        if from_tone and to_tone and from_tone != to_tone:
+            try:
+                cifra_transposed = transpose_chord_text(cifra_txt, from_tone, to_tone)
+            except Exception:
+                # se algo der errado, mantém a cifra original para não quebrar preview
+                cifra_transposed = cifra_txt
+
+    # remove marcador '|' só para exibir
+    cifra_show = strip_chord_markers_for_display(cifra_transposed)
+
+    # -----------------------------
+    # 3) Próximo item (rodapé)
+    # -----------------------------
     next_title = ""
     if footer_mode == "next" and footer_next_item:
         if footer_next_item.get("type") == "music":
@@ -986,6 +1196,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         else:
             next_title = footer_next_item.get("label", "Pausa")
 
+    # -----------------------------
+    # 4) HTML
+    # -----------------------------
     html = f"""
 <!doctype html>
 <html>

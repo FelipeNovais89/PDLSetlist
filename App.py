@@ -1,4 +1,4 @@
-# App.py — PDL Setlist (GitHub CSV para banco/setlists + Google Drive para TXT das cifras)
+7# App.py — PDL Setlist (GitHub CSV para banco/setlists + Google Drive para TXT das cifras)
 # ✅ Corrige:
 # - Funções duplicadas
 # - Indentação quebrada
@@ -1124,7 +1124,7 @@ def render_home():
 # ==============================================================
 
 def main():
-st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
+    st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
 init_state()
 
 if st.session_state.screen == "home":  

@@ -866,115 +866,148 @@ def render_setlist_editor_tree():
 
             # itens do bloco
             for i, item in enumerate(block["items"]):
+
 # ==============================================================
-# 10) PERSISTÊNCIA: salvar/carregar setlist (GitHub CSV)
+# 10) BANCO DE MÚSICAS – COM TELA DE CRIAÇÃO / GEMINI
 # ==============================================================
 
-def save_current_setlist_to_github():
-    name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
-    blocks = st.session_state.blocks
+def render_song_database():
+    st.subheader("Banco de músicas")
 
-    rows = []
-    for b_idx, block in enumerate(blocks):
-        block_name = block.get("name", f"Bloco {b_idx + 1}")
-        items = block.get("items", [])
-        for i_idx, item in enumerate(items):
-            base = {
-                "BlockIndex": b_idx + 1,
-                "BlockName": block_name,
-                "ItemIndex": i_idx + 1,
-                "ItemType": item["type"],
-                "SongTitle": "",
-                "Artist": "",
-                "Tom": "",
-                "BPM": "",
-                "CifraDriveID": "",
-                "CifraSimplificadaID": "",
-                "UseSimplificada": "",
-                "PauseLabel": "",
-            }
+    df = st.session_state.songs_df
+    st.dataframe(df, use_container_width=True, height=240)
 
-            if item["type"] == "music":
-                base["SongTitle"] = item.get("title", "")
-                base["Artist"] = item.get("artist", "")
-                base["Tom"] = item.get("tom", "")
-                base["BPM"] = item.get("bpm", "")
-                base["CifraDriveID"] = item.get("cifra_id", "")
-                base["CifraSimplificadaID"] = item.get("cifra_simplificada_id", "")
-                base["UseSimplificada"] = "1" if item.get("use_simplificada", False) else "0"
-            else:
-                base["PauseLabel"] = item.get("label", "Pausa")
+    with st.expander("Adicionar nova música ao banco", expanded=False):
+        # ---------------- METADADOS ----------------
+        col1, col2 = st.columns(2)
+        with col1:
+            title = st.text_input("Título", key="new_song_title")
+            artist = st.text_input("Artista", key="new_song_artist")
+        with col2:
+            tom_original = st.text_input(
+                "Tom original (ex.: Fm, C, Gm)", key="new_song_tom"
+            )
+            bpm = st.text_input("BPM", key="new_song_bpm")
 
-            rows.append(base)
+        st.markdown("---")
 
-    df_new = pd.DataFrame(rows, columns=SETLIST_COLS)
-    save_setlist_df_to_github(name, df_new)
+        # ================= CIFRA ORIGINAL =================
+        st.markdown("### 1) Cifra ORIGINAL")
 
+        uploaded_orig = st.file_uploader(
+            "Imagem (.jpg/.png) ou arquivo .txt da cifra ORIGINAL",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_cifra_original",
+        )
 
-def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFrame):
-    df_sel = load_setlist_df_from_github(setlist_name)
-    if df_sel.empty:
-        return
-
-    df_sel["BlockIndex"] = pd.to_numeric(df_sel["BlockIndex"], errors="coerce").fillna(0).astype(int)
-    df_sel["ItemIndex"] = pd.to_numeric(df_sel["ItemIndex"], errors="coerce").fillna(0).astype(int)
-    df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
-
-    blocks = []
-    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
-        items = []
-        for _, row in group.iterrows():
-            if row.get("ItemType") == "pause":
-                items.append({"type": "pause", "label": row.get("PauseLabel", "Pausa")})
-            else:
-                title = row.get("SongTitle", "")
-                artist = row.get("Artist", "")
-                tom_saved = row.get("Tom", "")
-                bpm_saved = row.get("BPM", "")
-
-                cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
-                cifra_simplificada_saved = str(row.get("CifraSimplificadaID", "")).strip()
-
-                use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
-                use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
-
-                song_row = songs_df[songs_df["Título"].astype(str) == str(title)]
-                if not song_row.empty:
-                    sr = song_row.iloc[0]
-                    tom_original = sr.get("Tom_Original", "") or tom_saved
-                    cifra_id_bank = str(sr.get("CifraDriveID", "")).strip()
-                    cifra_simplificada_bank = str(sr.get("CifraSimplificadaID", "")).strip()
-
-                    cifra_id = cifra_id_saved or cifra_id_bank
-                    cifra_simplificada_id = cifra_simplificada_saved or cifra_simplificada_bank
+        col_tr1, col_tr2 = st.columns([1, 3])
+        with col_tr1:
+            if st.button("Transcrever com Gemini (Original)"):
+                if uploaded_orig is None:
+                    st.warning("Envie uma imagem ou .txt primeiro.")
                 else:
-                    tom_original = tom_saved
-                    cifra_id = cifra_id_saved
-                    cifra_simplificada_id = cifra_simplificada_saved
+                    if uploaded_orig.type == "text/plain":
+                        text = uploaded_orig.getvalue().decode(
+                            "utf-8", errors="replace"
+                        )
+                    else:
+                        text = transcribe_image_with_gemini(uploaded_orig)
+                    st.session_state.new_song_cifra_original = text
 
-                items.append({
-                    "type": "music",
-                    "title": title,
-                    "artist": artist,
-                    "tom_original": tom_original,
-                    "tom": tom_saved or tom_original,
-                    "bpm": bpm_saved,
-                    "cifra_id": cifra_id,
-                    "cifra_simplificada_id": cifra_simplificada_id,
-                    "use_simplificada": use_simplificada,
-                    "text": "",
-                })
+        with col_tr2:
+            st.caption(
+                "Use este botão apenas se tiver enviado uma IMAGEM. "
+                "Você pode editar o texto antes de salvar."
+            )
 
-        blocks.append({"name": block_name or f"Bloco {len(blocks) + 1}", "items": items})
+        st.session_state.new_song_cifra_original = st.text_area(
+            "Texto da cifra ORIGINAL",
+            value=st.session_state.new_song_cifra_original,
+            height=240,
+            key="txt_new_cifra_original",
+        )
 
-    st.session_state.blocks = blocks
-    st.session_state.setlist_name = setlist_name
-    st.session_state.current_item = None
-    st.session_state.selected_block_idx = None
-    st.session_state.selected_item_idx = None
-    st.session_state.screen = "editor"
+        st.markdown("---")
 
+        # ================= CIFRA SIMPLIFICADA =================
+        st.markdown("### 2) Cifra SIMPLIFICADA (opcional)")
 
+        uploaded_simpl = st.file_uploader(
+            "Imagem (.jpg/.png) ou arquivo .txt da cifra SIMPLIFICADA",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_cifra_simplificada",
+        )
+
+        col_ts1, col_ts2 = st.columns([1, 3])
+        with col_ts1:
+            if st.button("Transcrever com Gemini (Simplificada)"):
+                if uploaded_simpl is None:
+                    st.warning("Envie uma imagem ou .txt primeiro.")
+                else:
+                    if uploaded_simpl.type == "text/plain":
+                        text_s = uploaded_simpl.getvalue().decode(
+                            "utf-8", errors="replace"
+                        )
+                    else:
+                        text_s = transcribe_image_with_gemini(uploaded_simpl)
+                    st.session_state.new_song_cifra_simplificada = text_s
+
+        with col_ts2:
+            st.caption("Opcional. Se não usar, deixe em branco.")
+
+        st.session_state.new_song_cifra_simplificada = st.text_area(
+            "Texto da cifra SIMPLIFICADA",
+            value=st.session_state.new_song_cifra_simplificada,
+            height=240,
+            key="txt_new_cifra_simplificada",
+        )
+
+        st.markdown("---")
+        st.markdown("### 3) Salvar no banco")
+
+        # ================= SALVAR =================
+        if st.button("Salvar nova música no banco", key="btn_save_new_song"):
+            if not title.strip():
+                st.warning("Preencha pelo menos o TÍTULO.")
+                return
+
+            with st.spinner("Criando arquivos e salvando dados..."):
+                content_orig = st.session_state.new_song_cifra_original.strip()
+                content_simpl = st.session_state.new_song_cifra_simplificada.strip()
+
+                cifra_id = ""
+                cifra_simpl_id = ""
+
+                # ----- Drive: ORIGINAL -----
+                if content_orig:
+                    nome_orig = f"{title} - {artist} (Original)"
+                    cifra_id = create_chord_in_drive(nome_orig, content_orig)
+
+                # ----- Drive: SIMPLIFICADA -----
+                if content_simpl:
+                    nome_simpl = f"{title} - {artist} (Simplificada)"
+                    cifra_simpl_id = create_chord_in_drive(
+                        nome_simpl, content_simpl
+                    )
+
+                # ----- Banco (CSV / Sheets) -----
+                append_song_to_sheet(
+                    title=title,
+                    artist=artist,
+                    tom_original=tom_original,
+                    bpm=bpm,
+                    cifra_id=cifra_id,
+                    cifra_simplificada_id=cifra_simpl_id,
+                )
+
+                # limpa estado
+                st.session_state.new_song_cifra_original = ""
+                st.session_state.new_song_cifra_simplificada = ""
+
+                st.success(f"Música '{title}' cadastrada com sucesso ✅")
+                st.session_state.songs_df = load_songs_df()
+                st.rerun()
+                
 # ==============================================================
 # 11) EDITOR EM ÁRVORE (SETLIST)
 # ==============================================================

@@ -1189,5 +1189,5 @@ with right_col:
         st.components.v1.html(html, height=1200, scrolling=True)
 
 if name == "main":
-main()
-render_selected_item_editor()
+   main()
+   render_selected_item_editor()

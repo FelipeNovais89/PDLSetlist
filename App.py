@@ -1125,69 +1125,77 @@ def render_home():
 
 def main():
     st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
-init_state()
 
-if st.session_state.screen == "home":  
-    render_home()  
-    return  
+    init_state()
 
-top_left, top_right = st.columns([3, 1])  
-with top_left:  
-    st.markdown(f"### Setlist: {st.session_state.setlist_name}")  
-    st.session_state.setlist_name = st.text_input(  
-        "Nome do setlist",  
-        value=st.session_state.setlist_name,  
-        label_visibility="collapsed",  
-    )  
-with top_right:  
-    if st.button("🏠 Voltar à tela inicial", use_container_width=True):  
-        st.session_state.screen = "home"  
-        st.rerun()  
-    if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):  
-        save_current_setlist_to_github()  
+    if st.session_state.screen == "home":
+        render_home()
+        return
 
-left_col, right_col = st.columns([1.1, 1])  
+    top_left, top_right = st.columns([3, 1])
 
-with left_col:  
-    st.subheader("Editor de Setlist (modo árvore)")  
-    render_setlist_editor_tree()  
+    with top_left:
+        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
+        st.session_state.setlist_name = st.text_input(
+            "Nome do setlist",
+            value=st.session_state.setlist_name,
+            label_visibility="collapsed",
+        )
 
-    st.markdown("---")  
-    render_song_database()  
+    with top_right:
+        if st.button("🏠 Voltar à tela inicial", use_container_width=True):
+            st.session_state.screen = "home"
+            st.rerun()
 
-with right_col:  
-    st.subheader("Preview")  
+        if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):
+            save_current_setlist_to_github()
 
-    blocks = st.session_state.blocks  
-    cur = st.session_state.current_item  
+    left_col, right_col = st.columns([1.1, 1])
 
-    current_item = None  
-    current_block_name = ""  
-    cur_block_idx = None  
-    cur_item_idx = None  
+    with left_col:
+        st.subheader("Editor de Setlist (modo árvore)")
+        render_setlist_editor_tree()
 
-    if cur is not None:  
-        b_idx, i_idx = cur  
-        if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):  
-            current_item = blocks[b_idx]["items"][i_idx]  
-            current_block_name = blocks[b_idx]["name"]  
-            cur_block_idx, cur_item_idx = b_idx, i_idx  
+        st.markdown("---")
+        render_song_database()
 
-    if current_item is None:  
-        for b_idx, block in enumerate(blocks):  
-            if block["items"]:  
-                current_item = block["items"][0]  
-                current_block_name = block["name"]  
-                cur_block_idx, cur_item_idx = b_idx, 0  
-                break  
+    with right_col:
+        st.subheader("Preview")
 
-    if current_item is None:  
-        st.info("Adicione músicas ao setlist para ver o preview.")  
-    else:  
-        footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)  
-        html = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)  
-        st.components.v1.html(html, height=1200, scrolling=True)
+        blocks = st.session_state.blocks
+        cur = st.session_state.current_item
 
-if name == "main":
-   main()
-   render_selected_item_editor()
+        current_item = None
+        current_block_name = ""
+        cur_block_idx = None
+        cur_item_idx = None
+
+        if cur is not None:
+            b_idx, i_idx = cur
+            if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
+                current_item = blocks[b_idx]["items"][i_idx]
+                current_block_name = blocks[b_idx]["name"]
+                cur_block_idx, cur_item_idx = b_idx, i_idx
+
+        if current_item is None:
+            for b_idx, block in enumerate(blocks):
+                if block["items"]:
+                    current_item = block["items"][0]
+                    current_block_name = block["name"]
+                    cur_block_idx, cur_item_idx = b_idx, 0
+                    break
+
+        if current_item is None:
+            st.info("Adicione músicas ao setlist para ver o preview.")
+        else:
+            footer_mode, footer_next_item = get_footer_context(
+                blocks, cur_block_idx, cur_item_idx
+            )
+            html = build_sheet_page_html(
+                current_item, footer_mode, footer_next_item, current_block_name
+            )
+            st.components.v1.html(html, height=1200, scrolling=True)
+
+
+if __name__ == "__main__":
+    main()

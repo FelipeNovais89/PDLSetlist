@@ -1,3 +1,26 @@
+# App.py — PDL Setlist (GitHub CSV para banco/setlists + Google Drive para TXT das cifras)
+# ✅ Corrige:
+# - Funções duplicadas
+# - Indentação quebrada
+# - Selectbox no mobile (músicas aparecem)
+# - Mantém TXT das cifras no Google Drive (você migrou só o CSV)
+#
+# Requisitos em st.secrets:
+# [github]
+# token = "ghp_...."          # (obrigatório p/ salvar setlists)
+# owner = "FelipeNovais89"
+# repo = "PDLSetlist"
+# branch = "main"
+# setlists_dir = "Data/Setlists"
+# songs_csv_url = "https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/refs/heads/main/Data/PDL_musicas.csv"
+#
+# [gcp_service_account]  (JSON do service account do Google)
+#
+# [drive]
+# folder_id = "..."           # (opcional) pasta onde salvar os txt
+#
+# gemini_api_key = "..."      # (opcional) só se usar transcrição por imagem
+
 import streamlit as st
 import pandas as pd
 import io
@@ -10,9 +33,11 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-from googleapiclient.errors import HttpError
 
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except Exception:
+    genai = None
 
 
 # ==============================================================
@@ -20,7 +45,6 @@ import google.generativeai as genai
 # ==============================================================
 
 def get_gemini_api_key():
-    """Procura a gemini_api_key em st.secrets."""
     try:
         if "gemini_api_key" in st.secrets:
             return st.secrets["gemini_api_key"]
@@ -32,40 +56,24 @@ def get_gemini_api_key():
 
 
 GEMINI_API_KEY = get_gemini_api_key()
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    st.warning(
-        "Gemini API key não encontrada em st.secrets. "
-        "Adicione 'gemini_api_key' no topo ou em [sheets]."
-    )
+if GEMINI_API_KEY and genai is not None:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+    except Exception:
+        pass
 
 
 # ==============================================================
-# 2) CONSTANTES – TRANSPOSIÇÃO
+# 2) CONSTANTES – TRANSPOSIÇÃO (mantido, mas não é obrigatório)
 # ==============================================================
 
 NOTE_SEQ_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 NOTE_SEQ_FLAT  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 NOTE_TO_INDEX = {
-    "C": 0,
-    "C#": 1,
-    "Db": 1,
-    "D": 2,
-    "D#": 3,
-    "Eb": 3,
-    "E": 4,
-    "F": 5,
-    "F#": 6,
-    "Gb": 6,
-    "G": 7,
-    "G#": 8,
-    "Ab": 8,
-    "A": 9,
-    "A#": 10,
-    "Bb": 10,
-    "B": 11,
+    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4,
+    "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8, "A": 9,
+    "A#": 10, "Bb": 10, "B": 11,
 }
 
 _TONE_BASES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -75,94 +83,9 @@ for r in _TONE_BASES:
     TONE_OPTIONS.append(r + "m")
 
 
-def split_root_and_suffix(symbol: str):
-    s = (symbol or "").strip()
-    if not s:
-        return "", ""
-    root = s[0].upper()
-    idx = 1
-    if len(s) > 1 and s[1] in ("#", "b"):
-        root += s[1]
-        idx = 2
-    suffix = s[idx:]
-    return root, suffix
-
-
-def parse_root_from_key(key: str):
-    root, _ = split_root_and_suffix(key)
-    return root or None
-
-
-def semitone_diff(orig_key: str, target_key: str) -> int:
-    r1 = parse_root_from_key(orig_key)
-    r2 = parse_root_from_key(target_key)
-    if not r1 or not r2:
-        return 0
-    i1 = NOTE_TO_INDEX.get(r1)
-    i2 = NOTE_TO_INDEX.get(r2)
-    if i1 is None or i2 is None:
-        return 0
-    return (i2 - i1) % 12
-
-
-def transpose_root(root: str, steps: int) -> str:
-    if steps == 0:
-        return root
-    idx = NOTE_TO_INDEX.get(root)
-    if idx is None:
-        return root
-
-    if "b" in root:
-        scale = NOTE_SEQ_FLAT
-    elif "#" in root:
-        scale = NOTE_SEQ_SHARP
-    else:
-        scale = NOTE_SEQ_SHARP
-
-    return scale[(idx + steps) % 12]
-
-
-def transpose_body_text(body: str, tom_original: str, tom_destino: str) -> str:
-    steps = semitone_diff(tom_original, tom_destino)
-    if steps == 0:
-        return body
-
-    lines = body.splitlines()
-    new_lines = []
-    for line in lines:
-        if not line.startswith("|"):
-            new_lines.append(line)
-            continue
-
-        marker = line[0]
-        text = line[1:]
-
-        def repl(match: re.Match):
-            root = match.group(1)
-            return transpose_root(root, steps)
-
-        transposed = re.sub(r"([A-G](?:#|b)?)", repl, text)
-        new_lines.append(marker + transposed)
-
-    return "\n".join(new_lines)
-
-
-def normalize_lyrics_indent(text: str) -> str:
-    lines = text.splitlines()
-    out = []
-    for line in lines:
-        if line.startswith("|"):
-            out.append(line)
-        else:
-            if line.startswith(" "):
-                out.append(line[1:])
-            else:
-                out.append(line)
-    return "\n".join(out)
-
-
 def strip_chord_markers_for_display(text: str) -> str:
-    lines = text.splitlines()
+    """Remove o marcador '|' das linhas de acorde (só para exibir)."""
+    lines = (text or "").splitlines()
     out = []
     for line in lines:
         if line.startswith("|"):
@@ -170,12 +93,16 @@ def strip_chord_markers_for_display(text: str) -> str:
         else:
             out.append(line)
     return "\n".join(out)
-    # ==============================================================
+
+
+# ==============================================================
 # 3) GEMINI – TRANSCRIÇÃO DE IMAGEM
 # ==============================================================
 
 def transcribe_image_with_gemini(uploaded_file, model_name="models/gemini-2.5-flash"):
-    """Recebe um arquivo de imagem do Streamlit e retorna texto da cifra."""
+    if genai is None:
+        st.error("Pacote google-generativeai não está disponível no ambiente.")
+        return ""
     api_key = get_gemini_api_key()
     if not api_key:
         st.error("Gemini API key não configurada em st.secrets.")
@@ -226,12 +153,11 @@ def get_drive_service():
 
 def create_chord_in_drive(filename, content):
     """Cria um novo .txt no Drive e retorna o FileID."""
-    if not content.strip():
+    if not (content or "").strip():
         return ""
 
     try:
         service = get_drive_service()
-
         folder_id = st.secrets.get("drive", {}).get("folder_id", None)
 
         file_metadata = {"name": f"{filename}.txt", "mimeType": "text/plain"}
@@ -248,11 +174,8 @@ def create_chord_in_drive(filename, content):
         )
         return file.get("id", "")
 
-    except HttpError as e:
-        st.error(f"Erro no Drive (upload): {e}")
-        return ""
     except Exception as e:
-        st.error(f"Erro inesperado ao criar arquivo no Drive: {e}")
+        st.error(f"Erro ao criar arquivo no Drive: {e}")
         return ""
 
 
@@ -270,12 +193,12 @@ def load_chord_from_drive(file_id: str) -> str:
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
-            status, done = downloader.next_chunk()
+            _, done = downloader.next_chunk()
 
         fh.seek(0)
         return fh.read().decode("utf-8", errors="replace")
 
-    except HttpError as e:
+    except Exception as e:
         return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
 
 
@@ -286,15 +209,16 @@ def save_chord_to_drive(file_id: str, content: str):
 
     try:
         service = get_drive_service()
-        fh = io.BytesIO(content.encode("utf-8"))
+        fh = io.BytesIO((content or "").encode("utf-8"))
         media = MediaIoBaseUpload(fh, mimetype="text/plain")
-
         service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
         load_chord_from_drive.clear()
 
-    except HttpError as e:
+    except Exception as e:
         st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
-        # ==============================================================
+
+
+# ==============================================================
 # 5) GITHUB – CSV BANCO + CSV SETLISTS
 # ==============================================================
 
@@ -304,13 +228,12 @@ def _gh_secrets():
     owner = gh.get("owner", "FelipeNovais89")
     repo = gh.get("repo", "PDLSetlist")
     branch = gh.get("branch", "main")
-    data_dir = gh.get("data_dir", "Data")
     setlists_dir = gh.get("setlists_dir", "Data/Setlists")
     songs_csv_url = gh.get(
         "songs_csv_url",
-        "https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/refs/heads/main/Data/PDL_musicas.csv"
+        "https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/refs/heads/main/Data/PDL_musicas.csv",
     )
-    return token, owner, repo, branch, data_dir, setlists_dir, songs_csv_url
+    return token, owner, repo, branch, setlists_dir, songs_csv_url
 
 
 def _gh_headers(token: str):
@@ -323,33 +246,59 @@ def _gh_headers(token: str):
     return h
 
 
+def _safe_filename(name: str) -> str:
+    name = (name or "").strip()
+    name = re.sub(r"[^\w\- ]+", "", name, flags=re.UNICODE)
+    name = name.replace(" ", "_")
+    return name or "Setlist_sem_nome"
+
+
 @st.cache_data(ttl=300)
 def load_songs_df_from_github_csv() -> pd.DataFrame:
-    token, owner, repo, branch, data_dir, setlists_dir, songs_csv_url = _gh_secrets()
+    token, owner, repo, branch, setlists_dir, songs_csv_url = _gh_secrets()
+
     try:
         r = requests.get(songs_csv_url, timeout=20)
         r.raise_for_status()
         df = pd.read_csv(io.StringIO(r.text))
     except Exception as e:
         st.error(f"Erro carregando CSV do GitHub: {e}")
-        df = pd.DataFrame(columns=["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"])
+        df = pd.DataFrame()
+
+    # normalize nomes de colunas (muito comum vir sem acento)
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.rename(columns={
+        "Titulo": "Título",
+        "titulo": "Título",
+        "Title": "Título",
+        "title": "Título",
+        "Artista": "Artista",
+        "artist": "Artista",
+        "Artist": "Artista",
+        "TomOriginal": "Tom_Original",
+        "Tom Original": "Tom_Original",
+        "Tom_Original": "Tom_Original",
+        "Bpm": "BPM",
+        "bpm": "BPM",
+        "CifraDriveId": "CifraDriveID",
+        "CifraSimplificadaId": "CifraSimplificadaID",
+    })
 
     # garante colunas esperadas
-    for col in ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]:
+    expected = ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]
+    for col in expected:
         if col not in df.columns:
             df[col] = ""
 
-    # limpa NaN
     df = df.fillna("")
     return df
 
 
-def list_setlist_files() -> list[str]:
-    """Lista arquivos CSV dentro de Data/Setlists no GitHub."""
-    token, owner, repo, branch, data_dir, setlists_dir, songs_csv_url = _gh_secrets()
+def list_setlist_files() -> list:
+    token, owner, repo, branch, setlists_dir, songs_csv_url = _gh_secrets()
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{setlists_dir}?ref={branch}"
-    r = requests.get(url, headers=_gh_headers(token), timeout=20)
 
+    r = requests.get(url, headers=_gh_headers(token), timeout=20)
     if r.status_code == 404:
         return []
     r.raise_for_status()
@@ -363,15 +312,8 @@ def list_setlist_files() -> list[str]:
     return names
 
 
-def _safe_filename(name: str) -> str:
-    name = (name or "").strip()
-    name = re.sub(r"[^\w\- ]+", "", name, flags=re.UNICODE)
-    name = name.replace(" ", "_")
-    return name or "Setlist_sem_nome"
-
-
 def load_setlist_df_from_github(setlist_name: str) -> pd.DataFrame:
-    token, owner, repo, branch, data_dir, setlists_dir, songs_csv_url = _gh_secrets()
+    token, owner, repo, branch, setlists_dir, songs_csv_url = _gh_secrets()
     fn = _safe_filename(setlist_name) + ".csv"
     path = f"{setlists_dir}/{fn}"
     url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
@@ -394,8 +336,7 @@ def load_setlist_df_from_github(setlist_name: str) -> pd.DataFrame:
 
 
 def save_setlist_df_to_github(setlist_name: str, df: pd.DataFrame):
-    """Cria/atualiza um arquivo Data/Setlists/<nome>.csv no GitHub via API."""
-    token, owner, repo, branch, data_dir, setlists_dir, songs_csv_url = _gh_secrets()
+    token, owner, repo, branch, setlists_dir, songs_csv_url = _gh_secrets()
     if not token:
         st.error("Faltou configurar github.token em st.secrets.")
         return
@@ -407,7 +348,7 @@ def save_setlist_df_to_github(setlist_name: str, df: pd.DataFrame):
     csv_text = df.to_csv(index=False)
     content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
 
-    # descobrir sha se existir
+    # sha se existir
     sha = None
     r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
     if r0.status_code == 200:
@@ -423,7 +364,9 @@ def save_setlist_df_to_github(setlist_name: str, df: pd.DataFrame):
         st.error(f"Erro ao salvar no GitHub: {r.status_code} - {r.text}")
     else:
         st.success(f"Setlist salva no GitHub: {fn}")
-        # ==============================================================
+
+
+# ==============================================================
 # 6) ESTRUTURA SETLIST (colunas do CSV)
 # ==============================================================
 
@@ -507,552 +450,7 @@ def delete_block(block_idx):
 
 
 # ==============================================================
-# ==============================================================
-# 9) EDITOR EM ÁRVORE (SETLIST)
-# ==============================================================
-
-def render_selected_item_editor():
-    """Form completo apenas para o item selecionado na árvore."""
-    b_idx = st.session_state.get("selected_block_idx", None)
-    i_idx = st.session_state.get("selected_item_idx", None)
-
-    if b_idx is None or i_idx is None:
-        st.info("Selecione uma música ou pausa na árvore acima para editar os detalhes.")
-        return
-
-    blocks = st.session_state.blocks
-    if not (0 <= b_idx < len(blocks)):
-        st.warning("Bloco selecionado inválido.")
-        return
-
-    items = blocks[b_idx]["items"]
-    if not (0 <= i_idx < len(items)):
-        st.warning("Item selecionado inválido.")
-        return
-
-    item = items[i_idx]
-
-    st.markdown("---")
-    st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
-
-    # ---------- MÚSICA ----------
-    if item.get("type") == "music":
-        title = item.get("title", "Nova música")
-        artist = item.get("artist", "")
-        st.markdown(f"**🎵 {title}**")
-        if artist:
-            st.caption(artist)
-
-        use_simplificada = item.get("use_simplificada", False)
-        btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
-
-        if st.button(
-            btn_label,
-            key=f"simpl_toggle_{b_idx}_{i_idx}",
-            help="Alternar entre cifra original e versão simplificada",
-        ):
-            item["use_simplificada"] = not use_simplificada
-            st.session_state.current_item = (b_idx, i_idx)
-            st.rerun()
-
-        cifra_id = item.get("cifra_id", "")
-        cifra_simplificada_id = item.get("cifra_simplificada_id", "")
-
-        with st.expander("Ver / editar cifra (texto)", expanded=True):
-            # Decide qual ID usar
-            if item.get("use_simplificada") and cifra_simplificada_id:
-                current_id = cifra_simplificada_id
-            elif cifra_id:
-                current_id = cifra_id
-            else:
-                current_id = None
-
-            # Carrega texto
-            if current_id:
-                cifra_text = load_chord_from_drive(current_id)
-            else:
-                cifra_text = item.get("text", "")
-
-            # Ajuste de fonte
-            font_size = st.session_state.cifra_font_size
-            col_font_minus, col_font_plus = st.columns(2)
-            if col_font_minus.button("A﹣", key=f"font_minus_sel_{b_idx}_{i_idx}"):
-                st.session_state.cifra_font_size = max(8, font_size - 1)
-                st.rerun()
-            if col_font_plus.button("A﹢", key=f"font_plus_sel_{b_idx}_{i_idx}"):
-                st.session_state.cifra_font_size = min(24, font_size + 1)
-                st.rerun()
-
-            edited = st.text_area(
-                "Cifra",
-                value=cifra_text,
-                height=300,
-                key=f"cifra_edit_sel_{b_idx}_{i_idx}",
-                label_visibility="collapsed",
-            )
-
-            st.markdown(
-                f"""
-                <style>
-                textarea[data-testid="stTextArea"] {{
-                    font-family: 'Courier New', monospace;
-                    font-size: {font_size}px;
-                }}
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
-                if current_id:
-                    save_chord_to_drive(current_id, edited)
-                    st.success("Cifra atualizada no Drive.")
-                else:
-                    item["text"] = edited
-                    st.success("Cifra salva apenas neste setlist (sem arquivo no Drive).")
-                st.rerun()
-
-        # BPM + TOM
-        bpm_val = item.get("bpm", "")
-        tom_original = item.get("tom_original", "") or item.get("tom", "")
-        tom_val = item.get("tom", tom_original)
-
-        lab_bpm, lab_tom = st.columns(2)
-        lab_bpm.markdown(
-            "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
-            unsafe_allow_html=True,
-        )
-        lab_tom.markdown(
-            "<p style='text-align:center;font-size:0.8rem;'>Tom</p>",
-            unsafe_allow_html=True,
-        )
-
-        col_bpm, col_tom = st.columns(2)
-
-        new_bpm = col_bpm.text_input(
-            "BPM",
-            value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
-            key=f"bpm_sel_{b_idx}_{i_idx}",
-            label_visibility="collapsed",
-            placeholder="BPM",
-        )
-        item["bpm"] = new_bpm
-
-        if tom_original.endswith("m"):
-            tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
-        else:
-            tone_list = [t for t in TONE_OPTIONS if not t.endswith("m")]
-
-        if tom_val and tom_val not in tone_list:
-            tone_list = [tom_val] + tone_list
-
-        idx_tone = tone_list.index(tom_val) if tom_val in tone_list else 0
-
-        selected_tone = col_tom.selectbox(
-            "Tom",
-            options=tone_list,
-            index=idx_tone,
-            key=f"tom_select_sel_{b_idx}_{i_idx}",
-            label_visibility="collapsed",
-        )
-        if selected_tone != tom_val:
-            item["tom"] = selected_tone
-            st.session_state.current_item = (b_idx, i_idx)
-            st.rerun()
-
-    # ---------- PAUSA ----------
-    else:
-        st.markdown("**⏸ Pausa**")
-        new_label = st.text_input(
-            "Descrição da pausa",
-            value=item.get("label", "Pausa"),
-            key=f"pause_label_{b_idx}_{i_idx}",
-        )
-        item["label"] = new_label
-
-
-def render_setlist_editor_tree():
-    """Estrutura em árvore: Blocos -> Itens. No mobile, usa selectbox pra adicionar música."""
-    blocks = st.session_state.blocks
-    songs_df = st.session_state.songs_df
-
-    st.markdown("### Estrutura da Setlist (modo árvore)")
-
-    if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
-        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
-        st.rerun()
-
-    for b_idx, block in enumerate(blocks):
-        with st.expander(f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}", expanded=False):
-            name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
-
-            new_name = name_col.text_input(
-                "Nome do bloco",
-                value=block.get("name", f"Bloco {b_idx+1}"),
-                key=f"blk_name_{b_idx}",
-                label_visibility="collapsed",
-            )
-            block["name"] = new_name
-
-            if up_col.button("↑", key=f"blk_up_{b_idx}"):
-                move_block(b_idx, -1)
-                st.rerun()
-            if down_col.button("↓", key=f"blk_down_{b_idx}"):
-                move_block(b_idx, 1)
-                st.rerun()
-            if del_col.button("✕", key=f"blk_del_{b_idx}"):
-                delete_block(b_idx)
-                st.rerun()
-
-            st.markdown("---")
-
-            # Lista itens do bloco
-            for i, item in enumerate(block.get("items", [])):
-                col_label, col_btns = st.columns([8, 2])
-
-                if item.get("type") == "music":
-                    title = item.get("title", "Nova música")
-                    artist = item.get("artist", "")
-                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
-                else:
-                    label = f"⏸ {item.get('label', 'Pausa')}"
-
-                if col_label.button(label, key=f"sel_item_{b_idx}_{i}"):
-                    st.session_state.selected_block_idx = b_idx
-                    st.session_state.selected_item_idx = i
-                    st.session_state.current_item = (b_idx, i)
-                    st.rerun()
-
-                with col_btns:
-                    col_u, col_d, col_x, col_p = st.columns(4)
-                    if col_u.button("↑", key=f"it_up_{b_idx}_{i}"):
-                        move_item(b_idx, i, -1)
-                        st.rerun()
-                    if col_d.button("↓", key=f"it_down_{b_idx}_{i}"):
-                        move_item(b_idx, i, 1)
-                        st.rerun()
-                    if col_x.button("✕", key=f"it_del_{b_idx}_{i}"):
-                        delete_item(b_idx, i)
-                        st.rerun()
-                    if col_p.button("👁", key=f"it_prev_{b_idx}_{i}"):
-                        st.session_state.current_item = (b_idx, i)
-                        st.rerun()
-
-            st.markdown("---")
-
-            col_add_mus, col_add_pause = st.columns(2)
-            if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}"):
-                st.session_state[f"show_add_music_block_{b_idx}"] = True
-            if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}"):
-                block["items"].append({"type": "pause", "label": "Pausa"})
-                st.rerun()
-
-            # ---------- ADD MÚSICA (mobile-safe) ----------
-            if st.session_state.get(f"show_add_music_block_{b_idx}", False):
-                st.markdown("##### Adicionar músicas deste bloco")
-
-                # Monta labels legíveis + map pra índice (evita guardar Series no dict)
-                options = []
-                idx_map = {}
-
-                for idx, row in songs_df.reset_index(drop=True).iterrows():
-                    titulo = str(row.get("Título", "")).strip()
-                    artista = str(row.get("Artista", "")).strip()
-                    tom = str(row.get("Tom_Original", "")).strip()
-
-                    if not titulo:
-                        continue
-
-                    label = f"{titulo} – {artista}" if artista else titulo
-                    if tom:
-                        label += f" ({tom})"
-
-                    options.append(label)
-                    idx_map[label] = int(idx)
-
-                if not options:
-                    st.warning("Banco de músicas vazio ou sem títulos válidos.")
-                else:
-                    # ✅ selectbox (mobile) + botão "Adicionar"
-                    selected_label = st.selectbox(
-                        "Escolha uma música",
-                        options=options,
-                        key=f"song_pick_{b_idx}",
-                    )
-
-                    col_a, col_b = st.columns(2)
-                    if col_a.button("Adicionar", key=f"confirm_add_one_{b_idx}"):
-                        row = songs_df.reset_index(drop=True).iloc[idx_map[selected_label]]
-
-                        cifra_id = str(row.get("CifraDriveID", "")).strip()
-                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
-
-                        new_item = {
-                            "type": "music",
-                            "title": row.get("Título", ""),
-                            "artist": row.get("Artista", ""),
-                            "tom_original": row.get("Tom_Original", ""),
-                            "tom": row.get("Tom_Original", ""),
-                            "bpm": row.get("BPM", ""),
-                            "cifra_id": cifra_id,
-                            "cifra_simplificada_id": cifra_simplificada_id,
-                            "use_simplificada": False,
-                            "text": "",
-                        }
-                        block["items"].append(new_item)
-
-                        # fecha e limpa
-                        st.session_state[f"show_add_music_block_{b_idx}"] = False
-                        st.rerun()
-
-                    if col_b.button("Fechar", key=f"close_add_music_{b_idx}"):
-                        st.session_state[f"show_add_music_block_{b_idx}"] = False
-                        st.rerun()
-
-    # Editor do item selecionado (fora do loop)
-    render_selected_item_editor()
-# ==============================================================
-# 10) BANCO DE MÚSICAS – COM TELA DE CRIAÇÃO / GEMINI
-# ==============================================================
-
-def render_song_database():
-    st.subheader("Banco de músicas")
-
-    df = st.session_state.songs_df
-    st.dataframe(df, use_container_width=True, height=240)
-
-    with st.expander("Adicionar nova música ao banco", expanded=False):
-        # ---------------- METADADOS ----------------
-        col1, col2 = st.columns(2)
-        with col1:
-            title = st.text_input("Título", key="new_song_title")
-            artist = st.text_input("Artista", key="new_song_artist")
-        with col2:
-            tom_original = st.text_input(
-                "Tom original (ex.: Fm, C, Gm)", key="new_song_tom"
-            )
-            bpm = st.text_input("BPM", key="new_song_bpm")
-
-        st.markdown("---")
-
-        # ================= CIFRA ORIGINAL =================
-        st.markdown("### 1) Cifra ORIGINAL")
-
-        uploaded_orig = st.file_uploader(
-            "Imagem (.jpg/.png) ou arquivo .txt da cifra ORIGINAL",
-            type=["jpg", "jpeg", "png", "txt"],
-            key="upload_cifra_original",
-        )
-
-        col_tr1, col_tr2 = st.columns([1, 3])
-        with col_tr1:
-            if st.button("Transcrever com Gemini (Original)"):
-                if uploaded_orig is None:
-                    st.warning("Envie uma imagem ou .txt primeiro.")
-                else:
-                    if uploaded_orig.type == "text/plain":
-                        text = uploaded_orig.getvalue().decode(
-                            "utf-8", errors="replace"
-                        )
-                    else:
-                        text = transcribe_image_with_gemini(uploaded_orig)
-                    st.session_state.new_song_cifra_original = text
-
-        with col_tr2:
-            st.caption(
-                "Use este botão apenas se tiver enviado uma IMAGEM. "
-                "Você pode editar o texto antes de salvar."
-            )
-
-        st.session_state.new_song_cifra_original = st.text_area(
-            "Texto da cifra ORIGINAL",
-            value=st.session_state.new_song_cifra_original,
-            height=240,
-            key="txt_new_cifra_original",
-        )
-
-        st.markdown("---")
-
-        # ================= CIFRA SIMPLIFICADA =================
-        st.markdown("### 2) Cifra SIMPLIFICADA (opcional)")
-
-        uploaded_simpl = st.file_uploader(
-            "Imagem (.jpg/.png) ou arquivo .txt da cifra SIMPLIFICADA",
-            type=["jpg", "jpeg", "png", "txt"],
-            key="upload_cifra_simplificada",
-        )
-
-        col_ts1, col_ts2 = st.columns([1, 3])
-        with col_ts1:
-            if st.button("Transcrever com Gemini (Simplificada)"):
-                if uploaded_simpl is None:
-                    st.warning("Envie uma imagem ou .txt primeiro.")
-                else:
-                    if uploaded_simpl.type == "text/plain":
-                        text_s = uploaded_simpl.getvalue().decode(
-                            "utf-8", errors="replace"
-                        )
-                    else:
-                        text_s = transcribe_image_with_gemini(uploaded_simpl)
-                    st.session_state.new_song_cifra_simplificada = text_s
-
-        with col_ts2:
-            st.caption("Opcional. Se não usar, deixe em branco.")
-
-        st.session_state.new_song_cifra_simplificada = st.text_area(
-            "Texto da cifra SIMPLIFICADA",
-            value=st.session_state.new_song_cifra_simplificada,
-            height=240,
-            key="txt_new_cifra_simplificada",
-        )
-
-        st.markdown("---")
-        st.markdown("### 3) Salvar no banco")
-
-        # ================= SALVAR =================
-        if st.button("Salvar nova música no banco", key="btn_save_new_song"):
-            if not title.strip():
-                st.warning("Preencha pelo menos o TÍTULO.")
-                return
-
-            with st.spinner("Criando arquivos e salvando dados..."):
-                content_orig = st.session_state.new_song_cifra_original.strip()
-                content_simpl = st.session_state.new_song_cifra_simplificada.strip()
-
-                cifra_id = ""
-                cifra_simpl_id = ""
-
-                # ----- Drive: ORIGINAL -----
-                if content_orig:
-                    nome_orig = f"{title} - {artist} (Original)"
-                    cifra_id = create_chord_in_drive(nome_orig, content_orig)
-
-                # ----- Drive: SIMPLIFICADA -----
-                if content_simpl:
-                    nome_simpl = f"{title} - {artist} (Simplificada)"
-                    cifra_simpl_id = create_chord_in_drive(
-                        nome_simpl, content_simpl
-                    )
-
-                # ----- Banco (CSV / Sheets) -----
-                append_song_to_sheet(
-                    title=title,
-                    artist=artist,
-                    tom_original=tom_original,
-                    bpm=bpm,
-                    cifra_id=cifra_id,
-                    cifra_simplificada_id=cifra_simpl_id,
-                )
-
-                # limpa estado
-                st.session_state.new_song_cifra_original = ""
-                st.session_state.new_song_cifra_simplificada = ""
-
-                st.success(f"Música '{title}' cadastrada com sucesso ✅")
-                st.session_state.songs_df = load_songs_df()
-                st.rerun()
-                
-# ==============================================================
-# 11) EDITOR EM ÁRVORE (SETLIST)
-# ==============================================================
-
-def render_setlist_editor_tree():
-    """Estrutura em árvore: Setlist -> Blocos -> Músicas / Pausas."""
-    blocks = st.session_state.blocks
-    songs_df = st.session_state.songs_df
-
-    st.markdown("### Estrutura da Setlist (modo árvore)")
-
-    # ---------- ADD BLOCO ----------
-    if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
-        st.session_state.blocks.append(
-            {"name": f"Bloco {len(blocks) + 1}", "items": []}
-        )
-        st.rerun()
-
-    # ---------- BLOCO LOOP ----------
-    for b_idx, block in enumerate(blocks):
-        with st.expander(f"Bloco {b_idx + 1}: {block['name']}", expanded=False):
-
-            # Cabeçalho do bloco
-            name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
-
-            block["name"] = name_col.text_input(
-                "Nome do bloco",
-                value=block["name"],
-                key=f"blk_name_{b_idx}",
-                label_visibility="collapsed",
-            )
-
-            if up_col.button("↑", key=f"blk_up_{b_idx}"):
-                move_block(b_idx, -1)
-                st.rerun()
-
-            if down_col.button("↓", key=f"blk_down_{b_idx}"):
-                move_block(b_idx, 1)
-                st.rerun()
-
-            if del_col.button("✕", key=f"blk_del_{b_idx}"):
-                delete_block(b_idx)
-                st.rerun()
-
-            st.markdown("---")
-
-            # ---------- ITENS DO BLOCO ----------
-            for i, item in enumerate(block["items"]):
-                col_label, col_btns = st.columns([8, 2])
-
-                if item["type"] == "music":
-                    title = item.get("title", "Nova música")
-                    artist = item.get("artist", "")
-                    label = f"🎵 {title}"
-                    if artist:
-                        label += f" – {artist}"
-                else:
-                    label = f"⏸ {item.get('label', 'Pausa')}"
-
-                if col_label.button(label, key=f"sel_item_{b_idx}_{i}"):
-                    st.session_state.selected_block_idx = b_idx
-                    st.session_state.selected_item_idx = i
-                    st.session_state.current_item = (b_idx, i)
-                    st.rerun()
-
-                with col_btns:
-                    col_u, col_d, col_x, col_p = st.columns(4)
-
-                    if col_u.button("↑", key=f"it_up_{b_idx}_{i}"):
-                        move_item(b_idx, i, -1)
-                        st.rerun()
-
-                    if col_d.button("↓", key=f"it_down_{b_idx}_{i}"):
-                        move_item(b_idx, i, 1)
-                        st.rerun()
-
-                    if col_x.button("✕", key=f"it_del_{b_idx}_{i}"):
-                        delete_item(b_idx, i)
-                        st.rerun()
-
-                    if col_p.button("👁", key=f"it_prev_{b_idx}_{i}"):
-                        st.session_state.current_item = (b_idx, i)
-                        st.rerun()
-
-            st.markdown("---")
-
-            # ---------- ADD MÚSICA / PAUSA ----------
-            col_add_mus, col_add_pause = st.columns(2)
-
-            if col_add_mus.button("+ Música do banco", key=f"add_mus_blk_{b_idx}"):
-                st.session_state[f"show_add_music_block_{b_idx}"] = True
-
-            if col_add_pause.button("+ Pausa", key=f"add_pause_blk_{b_idx}"):
-                block["items"].append({"type": "pause", "label": "Pausa"})
-                st.rerun()
-
-            # ---------- SELETOR DE MÚSICAS (CORRIGIDO) ----------
-            if st.session_state.get(f"show_add_music_block_{b_idx}", False):
-                st.markdown("##### Adicionar músicas deste bloco")
-# ==============================================================
-# 10) PERSISTÊNCIA: salvar/carregar setlist (GitHub CSV)
+# 9) PERSISTÊNCIA: salvar/carregar setlist (GitHub CSV)
 # ==============================================================
 
 def save_current_setlist_to_github():
@@ -1068,7 +466,7 @@ def save_current_setlist_to_github():
                 "BlockIndex": b_idx + 1,
                 "BlockName": block_name,
                 "ItemIndex": i_idx + 1,
-                "ItemType": item["type"],
+                "ItemType": item.get("type", ""),
                 "SongTitle": "",
                 "Artist": "",
                 "Tom": "",
@@ -1079,7 +477,7 @@ def save_current_setlist_to_github():
                 "PauseLabel": "",
             }
 
-            if item["type"] == "music":
+            if item.get("type") == "music":
                 base["SongTitle"] = item.get("title", "")
                 base["Artist"] = item.get("artist", "")
                 base["Tom"] = item.get("tom", "")
@@ -1109,7 +507,7 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
     for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
         items = []
         for _, row in group.iterrows():
-            if row.get("ItemType") == "pause":
+            if str(row.get("ItemType", "")).strip() == "pause":
                 items.append({"type": "pause", "label": row.get("PauseLabel", "Pausa")})
             else:
                 title = row.get("SongTitle", "")
@@ -1123,10 +521,11 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
                 use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
                 use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
 
+                # tenta casar com banco
                 song_row = songs_df[songs_df["Título"].astype(str) == str(title)]
                 if not song_row.empty:
                     sr = song_row.iloc[0]
-                    tom_original = sr.get("Tom_Original", "") or tom_saved
+                    tom_original = (sr.get("Tom_Original", "") or tom_saved).strip()
                     cifra_id_bank = str(sr.get("CifraDriveID", "")).strip()
                     cifra_simplificada_bank = str(sr.get("CifraSimplificadaID", "")).strip()
 
@@ -1161,7 +560,7 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
 
 
 # ==============================================================
-# 11) EDITOR EM ÁRVORE (SETLIST)
+# 10) EDITOR DO ITEM SELECIONADO
 # ==============================================================
 
 def render_selected_item_editor():
@@ -1169,7 +568,7 @@ def render_selected_item_editor():
     i_idx = st.session_state.get("selected_item_idx", None)
 
     if b_idx is None or i_idx is None:
-        st.info("Selecione uma música ou pausa na árvore acima para editar.")
+        st.info("Selecione uma música ou pausa na árvore acima para editar os detalhes.")
         return
 
     blocks = st.session_state.blocks
@@ -1183,11 +582,11 @@ def render_selected_item_editor():
         return
 
     item = items[i_idx]
+
     st.markdown("---")
     st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
 
-    # ---------- MÚSICA ----------
-    if item["type"] == "music":
+    if item.get("type") == "music":
         title = item.get("title", "Nova música")
         artist = item.get("artist", "")
         st.markdown(f"**🎵 {title}**")
@@ -1196,13 +595,14 @@ def render_selected_item_editor():
 
         use_simplificada = item.get("use_simplificada", False)
         btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
+
         if st.button(btn_label, key=f"simpl_toggle_{b_idx}_{i_idx}"):
             item["use_simplificada"] = not use_simplificada
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
 
-        cifra_id = item.get("cifra_id", "")
-        cifra_simplificada_id = item.get("cifra_simplificada_id", "")
+        cifra_id = (item.get("cifra_id", "") or "").strip()
+        cifra_simplificada_id = (item.get("cifra_simplificada_id", "") or "").strip()
 
         with st.expander("Ver / editar cifra (texto)", expanded=True):
             if item.get("use_simplificada") and cifra_simplificada_id:
@@ -1216,10 +616,10 @@ def render_selected_item_editor():
 
             font_size = st.session_state.cifra_font_size
             c1, c2 = st.columns(2)
-            if c1.button("A﹣", key=f"font_minus_{b_idx}_{i_idx}"):
+            if c1.button("A﹣", key=f"font_minus_sel_{b_idx}_{i_idx}"):
                 st.session_state.cifra_font_size = max(8, font_size - 1)
                 st.rerun()
-            if c2.button("A﹢", key=f"font_plus_{b_idx}_{i_idx}"):
+            if c2.button("A﹢", key=f"font_plus_sel_{b_idx}_{i_idx}"):
                 st.session_state.cifra_font_size = min(24, font_size + 1)
                 st.rerun()
 
@@ -1227,7 +627,7 @@ def render_selected_item_editor():
                 "Cifra",
                 value=cifra_text,
                 height=300,
-                key=f"cifra_edit_{b_idx}_{i_idx}",
+                key=f"cifra_edit_sel_{b_idx}_{i_idx}",
                 label_visibility="collapsed",
             )
 
@@ -1243,13 +643,13 @@ def render_selected_item_editor():
                 unsafe_allow_html=True,
             )
 
-            if st.button("Salvar cifra", key=f"save_cifra_{b_idx}_{i_idx}"):
+            if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
                 if current_id:
                     save_chord_to_drive(current_id, edited)
                     st.success("Cifra atualizada no Drive.")
                 else:
                     item["text"] = edited
-                    st.success("Cifra salva apenas no setlist (sem arquivo no Drive).")
+                    st.success("Cifra salva apenas neste setlist (sem arquivo no Drive).")
                 st.rerun()
 
         bpm_val = item.get("bpm", "")
@@ -1257,45 +657,63 @@ def render_selected_item_editor():
         tom_val = item.get("tom", tom_original)
 
         col_bpm, col_tom = st.columns(2)
+
         item["bpm"] = col_bpm.text_input(
             "BPM",
             value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
-            key=f"bpm_{b_idx}_{i_idx}",
+            key=f"bpm_sel_{b_idx}_{i_idx}",
         )
 
-        tone_list = [t for t in TONE_OPTIONS if t.endswith("m")] if tom_original.endswith("m") else [t for t in TONE_OPTIONS if not t.endswith("m")]
+        if (tom_original or "").endswith("m"):
+            tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
+        else:
+            tone_list = [t for t in TONE_OPTIONS if not t.endswith("m")]
+
         if tom_val and tom_val not in tone_list:
             tone_list = [tom_val] + tone_list
         idx_tone = tone_list.index(tom_val) if tom_val in tone_list else 0
 
+        selected_tone = col_tom.selectbox(
+            "Tom",
+            options=tone_list,
+            index=idx_tone,
+            key=f"tom_sel_{b_idx}_{i_idx}",
+        )
+        if selected_tone != tom_val:
+            item["tom"] = selected_tone
+            st.session_state.current_item = (b_idx, i_idx)
+            st.rerun()
+
+    else:
+        st.markdown("**⏸ Pausa**")
+        item["label"] = st.text_input(
+            "Descrição da pausa",
+            value=item.get("label", "Pausa"),
+            key=f"pause_label_{b_idx}_{i_idx}",
+        )
+
+
 # ==============================================================
-# 11) EDITOR EM ÁRVORE (SETLIST)
+# 11) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + selectbox mobile
 # ==============================================================
 
 def render_setlist_editor_tree():
-    """Estrutura em árvore: Setlist -> Blocos -> Músicas / Pausas."""
     blocks = st.session_state.blocks
     songs_df = st.session_state.songs_df
 
     st.markdown("### Estrutura da Setlist (modo árvore)")
 
-    # ---------- ADD BLOCO ----------
     if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
-        st.session_state.blocks.append(
-            {"name": f"Bloco {len(blocks) + 1}", "items": []}
-        )
+        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
         st.rerun()
 
-    # ---------- BLOCO LOOP ----------
     for b_idx, block in enumerate(blocks):
-        with st.expander(f"Bloco {b_idx + 1}: {block['name']}", expanded=False):
-
-            # Cabeçalho do bloco
+        with st.expander(f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}", expanded=False):
             name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
 
             block["name"] = name_col.text_input(
                 "Nome do bloco",
-                value=block["name"],
+                value=block.get("name", f"Bloco {b_idx+1}"),
                 key=f"blk_name_{b_idx}",
                 label_visibility="collapsed",
             )
@@ -1303,27 +721,23 @@ def render_setlist_editor_tree():
             if up_col.button("↑", key=f"blk_up_{b_idx}"):
                 move_block(b_idx, -1)
                 st.rerun()
-
             if down_col.button("↓", key=f"blk_down_{b_idx}"):
                 move_block(b_idx, 1)
                 st.rerun()
-
             if del_col.button("✕", key=f"blk_del_{b_idx}"):
                 delete_block(b_idx)
                 st.rerun()
 
             st.markdown("---")
 
-            # ---------- ITENS DO BLOCO ----------
-            for i, item in enumerate(block["items"]):
+            # itens
+            for i, item in enumerate(block.get("items", [])):
                 col_label, col_btns = st.columns([8, 2])
 
-                if item["type"] == "music":
+                if item.get("type") == "music":
                     title = item.get("title", "Nova música")
                     artist = item.get("artist", "")
-                    label = f"🎵 {title}"
-                    if artist:
-                        label += f" – {artist}"
+                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
                 else:
                     label = f"⏸ {item.get('label', 'Pausa')}"
 
@@ -1334,44 +748,38 @@ def render_setlist_editor_tree():
                     st.rerun()
 
                 with col_btns:
-                    col_u, col_d, col_x, col_p = st.columns(4)
-
-                    if col_u.button("↑", key=f"it_up_{b_idx}_{i}"):
+                    cu, cd, cx, cp = st.columns(4)
+                    if cu.button("↑", key=f"it_up_{b_idx}_{i}"):
                         move_item(b_idx, i, -1)
                         st.rerun()
-
-                    if col_d.button("↓", key=f"it_down_{b_idx}_{i}"):
+                    if cd.button("↓", key=f"it_down_{b_idx}_{i}"):
                         move_item(b_idx, i, 1)
                         st.rerun()
-
-                    if col_x.button("✕", key=f"it_del_{b_idx}_{i}"):
+                    if cx.button("✕", key=f"it_del_{b_idx}_{i}"):
                         delete_item(b_idx, i)
                         st.rerun()
-
-                    if col_p.button("👁", key=f"it_prev_{b_idx}_{i}"):
+                    if cp.button("👁", key=f"it_prev_{b_idx}_{i}"):
                         st.session_state.current_item = (b_idx, i)
                         st.rerun()
 
             st.markdown("---")
 
-            # ---------- ADD MÚSICA / PAUSA ----------
             col_add_mus, col_add_pause = st.columns(2)
-
-            if col_add_mus.button("+ Música do banco", key=f"add_mus_blk_{b_idx}"):
+            if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}"):
                 st.session_state[f"show_add_music_block_{b_idx}"] = True
-
-            if col_add_pause.button("+ Pausa", key=f"add_pause_blk_{b_idx}"):
+            if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}"):
                 block["items"].append({"type": "pause", "label": "Pausa"})
                 st.rerun()
 
-            # ---------- SELETOR DE MÚSICAS (CORRIGIDO) ----------
+            # add música (mobile-safe)
             if st.session_state.get(f"show_add_music_block_{b_idx}", False):
                 st.markdown("##### Adicionar músicas deste bloco")
 
                 options = []
-                option_map = {}
+                idx_map = {}
 
-                for _, row in songs_df.iterrows():
+                df_local = songs_df.reset_index(drop=True).copy()
+                for idx, row in df_local.iterrows():
                     titulo = str(row.get("Título", "")).strip()
                     artista = str(row.get("Artista", "")).strip()
                     tom = str(row.get("Tom_Original", "")).strip()
@@ -1384,17 +792,24 @@ def render_setlist_editor_tree():
                         label += f" ({tom})"
 
                     options.append(label)
-                    option_map[label] = row
+                    idx_map[label] = int(idx)
 
-                selected = st.multiselect(
-                    "Escolha as músicas do banco",
-                    options=options,
-                    key=f"mus_select_blk_{b_idx}",
-                )
+                if not options:
+                    st.warning("Banco de músicas vazio (ou coluna 'Título' está vazia).")
+                    st.caption("Dica: confira se o CSV tem a coluna Título/Titulo e se há linhas preenchidas.")
+                else:
+                    selected_label = st.selectbox(
+                        "Escolha uma música",
+                        options=options,
+                        key=f"song_pick_{b_idx}",
+                    )
 
-                if st.button("Adicionar selecionadas", key=f"confirm_add_mus_blk_{b_idx}"):
-                    for label in selected:
-                        row = option_map[label]
+                    ca, cb = st.columns(2)
+                    if ca.button("Adicionar", key=f"confirm_add_one_{b_idx}"):
+                        row = df_local.iloc[idx_map[selected_label]]
+
+                        cifra_id = str(row.get("CifraDriveID", "")).strip()
+                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
 
                         new_item = {
                             "type": "music",
@@ -1403,32 +818,33 @@ def render_setlist_editor_tree():
                             "tom_original": row.get("Tom_Original", ""),
                             "tom": row.get("Tom_Original", ""),
                             "bpm": row.get("BPM", ""),
-                            "cifra_id": str(row.get("CifraDriveID", "")).strip(),
-                            "cifra_simplificada_id": str(
-                                row.get("CifraSimplificadaID", "")
-                            ).strip(),
+                            "cifra_id": cifra_id,
+                            "cifra_simplificada_id": cifra_simplificada_id,
                             "use_simplificada": False,
                             "text": "",
                         }
-
                         block["items"].append(new_item)
+                        st.session_state[f"show_add_music_block_{b_idx}"] = False
+                        st.rerun()
 
-                    st.session_state[f"show_add_music_block_{b_idx}"] = False
-                    st.rerun()
+                    if cb.button("Fechar", key=f"close_add_music_{b_idx}"):
+                        st.session_state[f"show_add_music_block_{b_idx}"] = False
+                        st.rerun()
 
-    # ---------- EDITOR DO ITEM SELECIONADO ----------
     render_selected_item_editor()
-    # ==============================================================
-# 12) BANCO DE MÚSICAS – (somente visual + criação de txt no Drive)
-#     OBS: salvar no CSV do GitHub pode ser feito depois (se quiser).
+
+
+# ==============================================================
+# 12) BANCO DE MÚSICAS (GitHub CSV) + GERAR TXT NO DRIVE
 # ==============================================================
 
 def render_song_database():
     st.subheader("Banco de músicas (GitHub CSV)")
     df = st.session_state.songs_df
+
     st.dataframe(df, use_container_width=True, height=240)
 
-    with st.expander("Adicionar nova música ao banco (gera txt no Drive)", expanded=False):
+    with st.expander("Gerar TXT no Drive (para depois colar os IDs no CSV)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
             title = st.text_input("Título", key="new_title")
@@ -1441,20 +857,24 @@ def render_song_database():
 
         st.markdown("#### 1) Cifra ORIGINAL")
         up_orig = st.file_uploader(
-            "Opcional: envie imagem (.jpg/.png) ou .txt da cifra original",
+            "Envie imagem (.jpg/.png) ou .txt da cifra original",
             type=["jpg", "jpeg", "png", "txt"],
             key="upload_orig",
         )
 
-        if st.button("Transcrever imagem com Gemini (Original)", key="btn_tr_orig"):
-            if up_orig is None:
-                st.warning("Envie uma imagem primeiro.")
-            else:
-                if up_orig.type == "text/plain":
-                    text = up_orig.getvalue().decode("utf-8", errors="replace")
+        col_tr1, col_tr2 = st.columns([1, 3])
+        with col_tr1:
+            if st.button("Transcrever com Gemini (Original)", key="btn_tr_orig"):
+                if up_orig is None:
+                    st.warning("Envie uma imagem ou .txt primeiro.")
                 else:
-                    text = transcribe_image_with_gemini(up_orig)
-                st.session_state.new_song_cifra_original = text
+                    if up_orig.type == "text/plain":
+                        text = up_orig.getvalue().decode("utf-8", errors="replace")
+                    else:
+                        text = transcribe_image_with_gemini(up_orig)
+                    st.session_state.new_song_cifra_original = text
+        with col_tr2:
+            st.caption("Se você enviar um .txt, não precisa transcrever. Se enviar imagem, o Gemini tenta extrair.")
 
         st.session_state.new_song_cifra_original = st.text_area(
             "Texto da cifra ORIGINAL",
@@ -1467,14 +887,14 @@ def render_song_database():
 
         st.markdown("#### 2) Cifra SIMPLIFICADA (opcional)")
         up_simpl = st.file_uploader(
-            "Opcional: envie imagem (.jpg/.png) ou .txt da cifra simplificada",
+            "Envie imagem (.jpg/.png) ou .txt da cifra simplificada",
             type=["jpg", "jpeg", "png", "txt"],
             key="upload_simpl",
         )
 
-        if st.button("Transcrever imagem com Gemini (Simplificada)", key="btn_tr_simpl"):
+        if st.button("Transcrever com Gemini (Simplificada)", key="btn_tr_simpl"):
             if up_simpl is None:
-                st.warning("Envie uma imagem primeiro.")
+                st.warning("Envie uma imagem ou .txt primeiro.")
             else:
                 if up_simpl.type == "text/plain":
                     text_s = up_simpl.getvalue().decode("utf-8", errors="replace")
@@ -1492,7 +912,7 @@ def render_song_database():
         st.markdown("---")
         st.markdown("#### 3) Criar arquivos no Drive (TXT)")
         if st.button("Criar TXT no Drive", key="btn_create_txt"):
-            if not title.strip():
+            if not (title or "").strip():
                 st.warning("Preencha pelo menos o título.")
             else:
                 with st.spinner("Criando arquivos no Drive..."):
@@ -1508,12 +928,163 @@ def render_song_database():
                     if content_simpl.strip():
                         final_simpl_id = create_chord_in_drive(f"{title} - {artist} (Simplificada)", content_simpl)
 
-                st.success("TXT criado no Drive. Agora você pode colocar esses IDs no CSV depois.")
-                st.info(f"CifraDriveID: {final_cifra_id}\n\nCifraSimplificadaID: {final_simpl_id}")
+                st.success("TXT criado no Drive.")
+                st.info(
+                    f"Agora edite o CSV do banco e cole esses IDs:\n\n"
+                    f"- CifraDriveID: {final_cifra_id}\n"
+                    f"- CifraSimplificadaID: {final_simpl_id}\n\n"
+                    f"(Tom_Original: {tom_original} | BPM: {bpm})"
+                )
 
 
 # ==============================================================
-# 13) HOME
+# 13) PREVIEW (HTML simples)
+# ==============================================================
+
+def get_footer_context(blocks, cur_block_idx, cur_item_idx):
+    """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
+    if cur_block_idx is None or cur_item_idx is None:
+        return "none", None
+
+    # tenta achar o próximo item (na ordem)
+    b = cur_block_idx
+    i = cur_item_idx + 1
+
+    while b < len(blocks):
+        items = blocks[b].get("items", [])
+        if i < len(items):
+            nxt = items[i]
+            return "next", nxt
+        b += 1
+        i = 0
+
+    return "none", None
+
+
+def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
+    title = (item.get("title", "") if item.get("type") == "music" else item.get("label", "Pausa")) or ""
+    artist = item.get("artist", "") if item.get("type") == "music" else ""
+    bpm = item.get("bpm", "") if item.get("type") == "music" else ""
+    tom = item.get("tom", "") if item.get("type") == "music" else ""
+
+    # cifra
+    cifra_txt = ""
+    if item.get("type") == "music":
+        use_s = item.get("use_simplificada", False)
+        cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
+        cid = str(cid).strip()
+        if cid:
+            cifra_txt = load_chord_from_drive(cid)
+        else:
+            cifra_txt = item.get("text", "")
+    cifra_show = strip_chord_markers_for_display(cifra_txt)
+
+    next_title = ""
+    if footer_mode == "next" and footer_next_item:
+        if footer_next_item.get("type") == "music":
+            next_title = footer_next_item.get("title", "")
+        else:
+            next_title = footer_next_item.get("label", "Pausa")
+
+    html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+    body {{
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: white;
+        color: #111;
+    }}
+    .sheet {{
+        width: 100%;
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 18px 18px 40px 18px;
+    }}
+    .top {{
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: start;
+        gap: 12px;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }}
+    .title {{
+        font-size: 18px;
+        font-weight: 800;
+        margin: 0;
+    }}
+    .artist {{
+        font-size: 12px;
+        margin-top: 2px;
+        color: #444;
+    }}
+    .meta {{
+        text-align: right;
+        font-size: 12px;
+        color: #222;
+    }}
+    .meta b {{
+        display:block;
+        font-size: 12px;
+        margin-bottom: 2px;
+    }}
+    .cifra {{
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.25;
+        white-space: pre-wrap;
+        border: 1px solid #eee;
+        padding: 12px;
+        border-radius: 10px;
+        min-height: 520px;
+    }}
+    .footer {{
+        margin-top: 10px;
+        font-size: 12px;
+        color: #555;
+        display:flex;
+        justify-content: space-between;
+        border-top: 1px solid #eee;
+        padding-top: 8px;
+    }}
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="top">
+      <div>
+        <div class="title">{title}</div>
+        <div class="artist">{artist}</div>
+        <div class="artist">Bloco: {block_name}</div>
+      </div>
+      <div class="meta">
+        <b>BPM</b>{bpm if bpm else "-"}
+        <div style="height:8px"></div>
+        <b>Tom</b>{tom if tom else "-"}
+      </div>
+    </div>
+
+    <div class="cifra">{cifra_show}</div>
+
+    <div class="footer">
+      <div>Pagode do LEC</div>
+      <div>{("Próxima: " + next_title) if next_title else ""}</div>
+    </div>
+  </div>
+</body>
+</html>
+"""
+    return html
+
+
+# ==============================================================
+# 14) HOME
 # ==============================================================
 
 def render_home():
@@ -1547,9 +1118,9 @@ def render_home():
         else:
             st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
 
-
+            
 # ==============================================================
-# 14) MAIN
+# 15) MAIN
 # ==============================================================
 
 def main():

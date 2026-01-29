@@ -866,73 +866,114 @@ def render_setlist_editor_tree():
 
             # itens do bloco
             for i, item in enumerate(block["items"]):
-                col_label, col_btns = st.columns([8, 2])
+# ==============================================================
+# 10) PERSISTÊNCIA: salvar/carregar setlist (GitHub CSV)
+# ==============================================================
 
-                if item["type"] == "music":
-                    title = item.get("title", "Nova música")
-                    artist = item.get("artist", "")
-                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
+def save_current_setlist_to_github():
+    name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
+    blocks = st.session_state.blocks
+
+    rows = []
+    for b_idx, block in enumerate(blocks):
+        block_name = block.get("name", f"Bloco {b_idx + 1}")
+        items = block.get("items", [])
+        for i_idx, item in enumerate(items):
+            base = {
+                "BlockIndex": b_idx + 1,
+                "BlockName": block_name,
+                "ItemIndex": i_idx + 1,
+                "ItemType": item["type"],
+                "SongTitle": "",
+                "Artist": "",
+                "Tom": "",
+                "BPM": "",
+                "CifraDriveID": "",
+                "CifraSimplificadaID": "",
+                "UseSimplificada": "",
+                "PauseLabel": "",
+            }
+
+            if item["type"] == "music":
+                base["SongTitle"] = item.get("title", "")
+                base["Artist"] = item.get("artist", "")
+                base["Tom"] = item.get("tom", "")
+                base["BPM"] = item.get("bpm", "")
+                base["CifraDriveID"] = item.get("cifra_id", "")
+                base["CifraSimplificadaID"] = item.get("cifra_simplificada_id", "")
+                base["UseSimplificada"] = "1" if item.get("use_simplificada", False) else "0"
+            else:
+                base["PauseLabel"] = item.get("label", "Pausa")
+
+            rows.append(base)
+
+    df_new = pd.DataFrame(rows, columns=SETLIST_COLS)
+    save_setlist_df_to_github(name, df_new)
+
+
+def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFrame):
+    df_sel = load_setlist_df_from_github(setlist_name)
+    if df_sel.empty:
+        return
+
+    df_sel["BlockIndex"] = pd.to_numeric(df_sel["BlockIndex"], errors="coerce").fillna(0).astype(int)
+    df_sel["ItemIndex"] = pd.to_numeric(df_sel["ItemIndex"], errors="coerce").fillna(0).astype(int)
+    df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
+
+    blocks = []
+    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
+        items = []
+        for _, row in group.iterrows():
+            if row.get("ItemType") == "pause":
+                items.append({"type": "pause", "label": row.get("PauseLabel", "Pausa")})
+            else:
+                title = row.get("SongTitle", "")
+                artist = row.get("Artist", "")
+                tom_saved = row.get("Tom", "")
+                bpm_saved = row.get("BPM", "")
+
+                cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
+                cifra_simplificada_saved = str(row.get("CifraSimplificadaID", "")).strip()
+
+                use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
+                use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
+
+                song_row = songs_df[songs_df["Título"].astype(str) == str(title)]
+                if not song_row.empty:
+                    sr = song_row.iloc[0]
+                    tom_original = sr.get("Tom_Original", "") or tom_saved
+                    cifra_id_bank = str(sr.get("CifraDriveID", "")).strip()
+                    cifra_simplificada_bank = str(sr.get("CifraSimplificadaID", "")).strip()
+
+                    cifra_id = cifra_id_saved or cifra_id_bank
+                    cifra_simplificada_id = cifra_simplificada_saved or cifra_simplificada_bank
                 else:
-                    label = f"⏸ {item.get('label', 'Pausa')}"
+                    tom_original = tom_saved
+                    cifra_id = cifra_id_saved
+                    cifra_simplificada_id = cifra_simplificada_saved
 
-                if col_label.button(label, key=f"sel_{b_idx}_{i}"):
-                    st.session_state.selected_block_idx = b_idx
-                    st.session_state.selected_item_idx = i
-                    st.session_state.current_item = (b_idx, i)
-                    st.rerun()
+                items.append({
+                    "type": "music",
+                    "title": title,
+                    "artist": artist,
+                    "tom_original": tom_original,
+                    "tom": tom_saved or tom_original,
+                    "bpm": bpm_saved,
+                    "cifra_id": cifra_id,
+                    "cifra_simplificada_id": cifra_simplificada_id,
+                    "use_simplificada": use_simplificada,
+                    "text": "",
+                })
 
-                with col_btns:
-                    u, d, x, p = st.columns(4)
-                    if u.button("↑", key=f"it_up_{b_idx}_{i}"):
-                        move_item(b_idx, i, -1); st.rerun()
-                    if d.button("↓", key=f"it_dn_{b_idx}_{i}"):
-                        move_item(b_idx, i, 1); st.rerun()
-                    if x.button("✕", key=f"it_x_{b_idx}_{i}"):
-                        delete_item(b_idx, i); st.rerun()
-                    if p.button("👁", key=f"it_prev_{b_idx}_{i}"):
-                        st.session_state.current_item = (b_idx, i); st.rerun()
+        blocks.append({"name": block_name or f"Bloco {len(blocks) + 1}", "items": items})
 
-            st.markdown("---")
+    st.session_state.blocks = blocks
+    st.session_state.setlist_name = setlist_name
+    st.session_state.current_item = None
+    st.session_state.selected_block_idx = None
+    st.session_state.selected_item_idx = None
+    st.session_state.screen = "editor"
 
-            col_add_mus, col_add_pause = st.columns(2)
-            if col_add_mus.button("+ Música do banco", key=f"btn_add_mus_{b_idx}"):
-                st.session_state[f"show_add_music_{b_idx}"] = True
-            if col_add_pause.button("+ Pausa", key=f"btn_add_pause_{b_idx}"):
-                block["items"].append({"type": "pause", "label": "Pausa"})
-                st.rerun()
-
-            # ✅ CORREÇÃO DO "CHOOSE OPTIONS" (mobile):
-            if st.session_state.get(f"show_add_music_block_{b_idx}", False):
-    st.markdown("##### Adicionar músicas deste bloco")
-
-    # Cria opções legíveis: "Título – Artista (Tom)"
-    options = []
-    option_map = {}
-
-    for _, row in songs_df.iterrows():
-        titulo = str(row.get("Título", "")).strip()
-        artista = str(row.get("Artista", "")).strip()
-        tom = str(row.get("Tom_Original", "")).strip()
-
-        if not titulo:
-            continue
-
-        label = f"{titulo} – {artista}" if artista else titulo
-        if tom:
-            label += f" ({tom})"
-
-        options.append(label)
-        option_map[label] = row
-
-    selected = st.multiselect(
-        "Escolha as músicas do banco",
-        options=options,
-        key=f"mus_select_blk_{b_idx}",
-    )
-
-    if st.button("Adicionar selecionadas", key=f"confirm_add_mus_blk_{b_idx}"):
-        for label in selected:
-            row = option_map[label]
 
 # ==============================================================
 # 11) EDITOR EM ÁRVORE (SETLIST)

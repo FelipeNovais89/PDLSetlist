@@ -694,28 +694,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     </html>
     """
     # ==============================================================
-# 10) PERSISTÊNCIA: salvar/carregar setlist (GitHub CSV)
-# ==============================================================
 
-def save_current_setlist_to_github():
-    name = (st.session_state.setlist_name or "").strip() or "Setlist sem nome"
-    blocks = st.session_state.blocks
-
-    rows = []
-    for b_idx, block in enumerate(blocks):
-        block_name = block.get("name", f"Bloco {b_idx + 1}")
-        items = block.get("items", [])
-        for i_idx, item in enumerate(items):
-            base = {
-                "BlockIndex": b_idx + 1,
-                "BlockName": block_name,
-                "ItemIndex": i_idx + 1,
-                "ItemType": item["type"],
-                "SongTitle": "",
-                "Artist": "",
-                "Tom": "",
-                "BPM": "",
-                "CifraDriveID": "",
                 "CifraSimplificadaID": "",
                 "UseSimplificada": "",
                 "PauseLabel": "",
@@ -838,35 +817,6 @@ st.success("Cifra atualizada no Drive.")
             value=item.get("label", "Pausa"),
             key=f"pause_label_{b_idx}_{i_idx}",
         )
-
-
-def render_setlist_editor_tree():
-    blocks = st.session_state.blocks
-    songs_df = st.session_state.songs_df
-
-    st.markdown("### Estrutura da Setlist (modo árvore)")
-
-    if st.button("+ Adicionar bloco", use_container_width=True):
-        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
-        st.rerun()
-
-    for b_idx, block in enumerate(blocks):
-        with st.expander(f"Bloco {b_idx + 1}: {block['name']}", expanded=False):
-            name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
-            block["name"] = name_col.text_input("Nome", value=block["name"], key=f"blk_name_{b_idx}", label_visibility="collapsed")
-
-            if up_col.button("↑", key=f"blk_up_{b_idx}"):
-                move_block(b_idx, -1); st.rerun()
-            if down_col.button("↓", key=f"blk_down_{b_idx}"):
-                move_block(b_idx, 1); st.rerun()
-            if del_col.button("✕", key=f"blk_del_{b_idx}"):
-                delete_block(b_idx); st.rerun()
-
-            st.markdown("---")
-
-            # itens do bloco
-            for i, item in enumerate(block["items"]):
-
 # ==============================================================
 # 10) BANCO DE MÚSICAS – COM TELA DE CRIAÇÃO / GEMINI
 # ==============================================================

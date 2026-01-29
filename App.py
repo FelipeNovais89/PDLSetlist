@@ -989,18 +989,59 @@ def render_setlist_editor_tree():
 
             # ✅ CORREÇÃO DO "CHOOSE OPTIONS" (mobile):
             if st.session_state.get(f"show_add_music_{b_idx}", False):
-                st.markdown("##### Adicionar músicas (busca + 1 por vez)")
-                query = st.text_input("Buscar", value="", key=f"q_{b_idx}", placeholder="Digite parte do título...")
+                st.markdown("##### Adicionar músicas deste bloco")
 
-                all_titles = list(songs_df["Título"].astype(str))
-                filtered = [t for t in all_titles if query.lower() in t.lower()] if query else all_titles
-                filtered = filtered[:300]  # evita lista gigante travar
+# (opcional, mas ajuda muito no mobile) campo de busca
+q = st.text_input(
+    "Buscar música",
+    value="",
+    key=f"music_search_{b_idx}",
+    placeholder="Digite parte do título…",
+)
 
-                pick = st.selectbox(
-                    "Escolha 1 música",
-                    options=["(selecione)"] + filtered,
-                    key=f"pick_{b_idx}",
-                )
+all_titles = list(songs_df["Título"].astype(str))
+filtered_titles = [t for t in all_titles if q.lower() in t.lower()] if q else all_titles
+
+# evita travar se tiver MUITA música
+filtered_titles = filtered_titles[:300]
+
+picked_title = st.selectbox(
+    "Escolha uma música do banco",
+    options=["(selecione)"] + filtered_titles,
+    key=f"music_pick_{b_idx}",
+)
+
+col_add, col_close = st.columns(2)
+
+if col_add.button("Adicionar", key=f"confirm_add_one_{b_idx}"):
+    if picked_title == "(selecione)":
+        st.warning("Selecione uma música.")
+    else:
+        row = songs_df[songs_df["Título"].astype(str) == str(picked_title)].iloc[0]
+
+        cifra_id = str(row.get("CifraDriveID", "")).strip()
+        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
+
+        new_item = {
+            "type": "music",
+            "title": row.get("Título", ""),
+            "artist": row.get("Artista", ""),
+            "tom_original": row.get("Tom_Original", ""),
+            "tom": row.get("Tom_Original", ""),
+            "bpm": row.get("BPM", ""),
+            "cifra_id": cifra_id,
+            "cifra_simplificada_id": cifra_simplificada_id,
+            "use_simplificada": False,
+            "text": "",
+        }
+
+        block["items"].append(new_item)
+        st.success(f"Adicionado: {picked_title}")
+        st.rerun()
+
+if col_close.button("Fechar", key=f"close_add_music_{b_idx}"):
+    st.session_state[f"show_add_music_block_{b_idx}"] = False
+    st.rerun()
 
                 cA, cB = st.columns([1, 1])
                 if cA.button("Adicionar", key=f"add_one_{b_idx}"):

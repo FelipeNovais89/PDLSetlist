@@ -1,4 +1,4 @@
-7# App.py — PDL Setlist (GitHub CSV para banco/setlists + Google Drive para TXT das cifras)
+# App.py — PDL Setlist (GitHub CSV para banco/setlists + Google Drive para TXT das cifras)
 # ✅ Corrige:
 # - Funções duplicadas
 # - Indentação quebrada

@@ -1151,9 +1151,30 @@ def render_song_database():
                 )
 
 
+
 # ==============================================================
 # 13) PREVIEW (HTML simples) — ✅ com OBS/PREPARAÇÃO
 # ==============================================================
+
+def get_footer_context(blocks, cur_block_idx, cur_item_idx):
+    """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
+    if cur_block_idx is None or cur_item_idx is None:
+        return "none", None
+
+    # tenta achar o próximo item (na ordem)
+    b = cur_block_idx
+    i = cur_item_idx + 1
+
+    while b < len(blocks):
+        items = blocks[b].get("items", [])
+        if i < len(items):
+            nxt = items[i]
+            return "next", nxt
+        b += 1
+        i = 0
+
+    return "none", None
+
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     title = (item.get("title", "") if item.get("type") == "music" else item.get("label", "Pausa")) or ""
@@ -1193,7 +1214,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             next_title = footer_next_item.get("label", "Pausa") or ""
 
     def esc(s: str) -> str:
-        # escape simples p/ HTML
         return (
             (s or "")
             .replace("&", "&amp;")
@@ -1266,6 +1286,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         font-size: 12px;
         color: #222;
         white-space: pre-wrap;
+        min-height: 22px;
     }}
 
     .cifra {{

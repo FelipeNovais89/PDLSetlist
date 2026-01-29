@@ -1128,10 +1128,12 @@ def main():
 
     init_state()
 
+    # ---------- HOME ----------
     if st.session_state.screen == "home":
         render_home()
         return
 
+    # ---------- HEADER ----------
     top_left, top_right = st.columns([3, 1])
 
     with top_left:
@@ -1150,8 +1152,10 @@ def main():
         if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):
             save_current_setlist_to_github()
 
+    # ---------- LAYOUT PRINCIPAL ----------
     left_col, right_col = st.columns([1.1, 1])
 
+    # ---------- COLUNA ESQUERDA ----------
     with left_col:
         st.subheader("Editor de Setlist (modo árvore)")
         render_setlist_editor_tree()
@@ -1159,43 +1163,72 @@ def main():
         st.markdown("---")
         render_song_database()
 
+    # ==========================================================
+    # ---------- COLUNA DIREITA — PREVIEW (CORRIGIDO) ----------
+    # ==========================================================
     with right_col:
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
-        cur = st.session_state.current_item
 
         current_item = None
         current_block_name = ""
         cur_block_idx = None
         cur_item_idx = None
 
-        if cur is not None:
-            b_idx, i_idx = cur
-            if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
-                current_item = blocks[b_idx]["items"][i_idx]
-                current_block_name = blocks[b_idx]["name"]
-                cur_block_idx, cur_item_idx = b_idx, i_idx
+        # --------------------------------------------------
+        # ✅ PRIORIDADE 1: item SELECIONADO no editor
+        # --------------------------------------------------
+        sel_b = st.session_state.selected_block_idx
+        sel_i = st.session_state.selected_item_idx
 
+        if sel_b is not None and sel_i is not None:
+            if 0 <= sel_b < len(blocks) and 0 <= sel_i < len(blocks[sel_b]["items"]):
+                current_item = blocks[sel_b]["items"][sel_i]
+                current_block_name = blocks[sel_b]["name"]
+                cur_block_idx = sel_b
+                cur_item_idx = sel_i
+
+        # --------------------------------------------------
+        # PRIORIDADE 2: item marcado com 👁 (current_item)
+        # --------------------------------------------------
+        if current_item is None:
+            cur = st.session_state.current_item
+            if cur is not None:
+                b_idx, i_idx = cur
+                if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
+                    current_item = blocks[b_idx]["items"][i_idx]
+                    current_block_name = blocks[b_idx]["name"]
+                    cur_block_idx = b_idx
+                    cur_item_idx = i_idx
+
+        # --------------------------------------------------
+        # PRIORIDADE 3: primeira música do setlist
+        # --------------------------------------------------
         if current_item is None:
             for b_idx, block in enumerate(blocks):
                 if block["items"]:
                     current_item = block["items"][0]
                     current_block_name = block["name"]
-                    cur_block_idx, cur_item_idx = b_idx, 0
+                    cur_block_idx = b_idx
+                    cur_item_idx = 0
                     break
 
+        # --------------------------------------------------
+        # RENDERIZAÇÃO FINAL
+        # --------------------------------------------------
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
         else:
             footer_mode, footer_next_item = get_footer_context(
                 blocks, cur_block_idx, cur_item_idx
             )
+
             html = build_sheet_page_html(
-                current_item, footer_mode, footer_next_item, current_block_name
+                current_item,
+                footer_mode,
+                footer_next_item,
+                current_block_name,
             )
+
             st.components.v1.html(html, height=1200, scrolling=True)
-
-
-if __name__ == "__main__":
-    main()

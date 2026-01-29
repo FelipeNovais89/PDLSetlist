@@ -802,7 +802,7 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
     st.session_state.screen = "editor"
 
 
-atualizada no Drive.")
+st.success("Cifra atualizada no Drive.")
                 else:
                     item["text"] = edited
                     st.success("Cifra salva apenas no setlist (sem arquivo no Drive).")

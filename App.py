@@ -507,303 +507,154 @@ def delete_block(block_idx):
 
 
 # ==============================================================
-# 9) HTML – HEADER/FOOTER/PÁGINA
+# ==============================================================
+# 9) EDITOR EM ÁRVORE (SETLIST)
 # ==============================================================
 
-def get_footer_context(blocks, cur_block_idx, cur_item_idx):
-    items = blocks[cur_block_idx]["items"]
-    if cur_item_idx + 1 < len(items):
-        nxt = items[cur_item_idx + 1]
-        if nxt["type"] == "pause":
-            return "next_pause", nxt
-        else:
-            return "next_music", nxt
+def render_selected_item_editor():
+    """Form completo apenas para o item selecionado na árvore."""
+    b_idx = st.session_state.get("selected_block_idx", None)
+    i_idx = st.session_state.get("selected_item_idx", None)
 
-    for b in range(cur_block_idx + 1, len(blocks)):
-        if blocks[b]["items"]:
-            return "end_block", None
+    if b_idx is None or i_idx is None:
+        st.info("Selecione uma música ou pausa na árvore acima para editar os detalhes.")
+        return
 
-    return "none", None
+    blocks = st.session_state.blocks
+    if not (0 <= b_idx < len(blocks)):
+        st.warning("Bloco selecionado inválido.")
+        return
 
+    items = blocks[b_idx]["items"]
+    if not (0 <= i_idx < len(items)):
+        st.warning("Item selecionado inválido.")
+        return
 
-def build_sheet_header_html(title, artist, tom, bpm):
-    tom_display = tom if tom else "- / -"
-    bpm_display = bpm if bpm not in (None, "", 0) else "BPM"
-    return f"""
-    <div class="sheet-header">
-        <div class="sheet-header-col sheet-header-main">
-            <div class="sheet-title">{(title or "NOVA MÚSICA").upper()}</div>
-            <div class="sheet-artist">{artist or ""}</div>
-        </div>
-        <div class="sheet-header-col sheet-header-tom">
-            <div class="sheet-label">TOM</div>
-            <div class="sheet-value">{tom_display}</div>
-        </div>
-        <div class="sheet-header-col sheet-header-bpm">
-            <div class="sheet-label">BPM</div>
-            <div class="sheet-value">{bpm_display}</div>
-        </div>
-    </div>
-    """
+    item = items[i_idx]
 
+    st.markdown("---")
+    st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
 
-def build_footer_next_music(next_title, next_artist, next_tone, next_bpm):
-    tone_text = next_tone or "-"
-    bpm_text = str(next_bpm) if next_bpm not in (None, "", 0) else "-"
-    return f"""
-    <div class="sheet-footer sheet-footer-grid">
-        <div class="sheet-next-label">PRÓXIMA:</div>
-        <div class="sheet-next-header-row">
-            <div class="sheet-next-title">{(next_title or "").upper()}</div>
-            <div class="sheet-next-tombpm-header">
-                <span class="sheet-next-tom-header">TOM</span>
-                <span class="sheet-next-bpm-header">BPM</span>
-            </div>
-        </div>
-        <div class="sheet-next-values-row">
-            <div class="sheet-next-artist">{next_artist or ""}</div>
-            <div class="sheet-next-tombpm-values">
-                <span class="sheet-next-tom-value">{tone_text}</span>
-                <span class="sheet-next-bpm-value">{bpm_text}</span>
-            </div>
-        </div>
-    </div>
-    """
-
-
-def build_footer_next_pause(label):
-    txt = (label or "Pausa").upper()
-    return f"""
-    <div class="sheet-footer sheet-footer-center">
-        <div class="sheet-next-label">PRÓXIMA:</div>
-        <div class="sheet-next-pause-wrapper">
-            <div class="sheet-next-pause">{txt}</div>
-        </div>
-    </div>
-    """
-
-
-def build_footer_end_of_block():
-    return """
-    <div class="sheet-footer sheet-footer-endblock">
-        <div class="sheet-endblock-wrapper">
-            <div class="sheet-endblock-text">FIM DE BLOCO</div>
-        </div>
-    </div>
-    """
-
-
-def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    if item["type"] == "pause":
-        title = item.get("label", "PAUSA")
-        artist = block_name
-        tom = ""
-        bpm = ""
-        raw_body = "PAUSA / INTERVALO"
-        tom_original = ""
-        tom_atual = ""
-    else:
-        title = item.get("title", "NOVA MÚSICA")
+    # ---------- MÚSICA ----------
+    if item.get("type") == "music":
+        title = item.get("title", "Nova música")
         artist = item.get("artist", "")
-        tom_original = item.get("tom_original", "") or item.get("tom", "")
-        tom = item.get("tom", tom_original)
-        bpm = item.get("bpm", "")
+        st.markdown(f"**🎵 {title}**")
+        if artist:
+            st.caption(artist)
 
         use_simplificada = item.get("use_simplificada", False)
+        btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
+
+        if st.button(
+            btn_label,
+            key=f"simpl_toggle_{b_idx}_{i_idx}",
+            help="Alternar entre cifra original e versão simplificada",
+        ):
+            item["use_simplificada"] = not use_simplificada
+            st.session_state.current_item = (b_idx, i_idx)
+            st.rerun()
+
         cifra_id = item.get("cifra_id", "")
         cifra_simplificada_id = item.get("cifra_simplificada_id", "")
 
-        if use_simplificada and cifra_simplificada_id:
-            raw_body = load_chord_from_drive(cifra_simplificada_id)
-        elif cifra_id:
-            raw_body = load_chord_from_drive(cifra_id)
-        else:
-            raw_body = item.get("text", "CIFRA / TEXTO AQUI (ainda não cadastrada).")
-
-        tom_atual = tom
-
-    if item["type"] == "pause":
-        body_final = raw_body
-    else:
-        body_transposed = transpose_body_text(raw_body, tom_original, tom_atual)
-        body_norm = normalize_lyrics_indent(body_transposed)
-        body_final = strip_chord_markers_for_display(body_norm)
-
-    header_html = build_sheet_header_html(title, artist, tom, bpm)
-
-    if footer_mode == "next_music" and footer_next_item is not None:
-        footer_html = build_footer_next_music(
-            footer_next_item.get("title", ""),
-            footer_next_item.get("artist", ""),
-            footer_next_item.get("tom", ""),
-            footer_next_item.get("bpm", ""),
-        )
-    elif footer_mode == "next_pause" and footer_next_item is not None:
-        footer_html = build_footer_next_pause(footer_next_item.get("label", "Pausa"))
-    elif footer_mode == "end_block":
-        footer_html = build_footer_end_of_block()
-    else:
-        footer_html = ""
-
-    body_html = f"""
-        <div class="sheet-body">
-          <pre class="sheet-body-text">{body_final}</pre>
-        </div>
-    """
-
-    return f"""
-    <html>
-    <head>
-      <style>
-        body {{ margin:0; padding:16px; background:#111; }}
-        .sheet {{
-            width: 800px; height: 1130px;
-            background: white;
-            padding: 40px 40px 60px 40px;
-            box-sizing: border-box;
-            font-family: "Courier New", monospace;
-            margin: 0 auto;
-        }}
-        .sheet-header {{
-            display: grid;
-            grid-template-columns: 2fr 1fr 0.25fr;
-            align-items: center;
-            padding: 4px 4px 8px;
-            border-bottom: 1px solid #ccc;
-            font-size: 10px;
-        }}
-        .sheet-title {{ font-weight:700; font-size: 10px; }}
-        .sheet-artist {{ font-weight:400; font-size: 8px; }}
-        .sheet-label {{ font-weight:700; text-align:center; font-size: 9px; }}
-        .sheet-value {{ text-align:center; font-size: 8px; }}
-        .sheet-body {{ padding: 12px 8px; min-height: 420px; }}
-        .sheet-body-text {{ white-space: pre-wrap; font-size: 10px; line-height: 1.3; }}
-        .sheet-footer {{ font-size: 8px; margin-top:auto; padding-top:4px; border-top:1px solid #ccc; }}
-        .sheet-next-title {{ font-weight:700; }}
-        .sheet-next-pause {{ font-size: 12px; font-weight: 700; }}
-        .sheet-endblock-text {{ font-size: 12px; font-weight: 700; }}
-      </style>
-    </head>
-    <body>
-      <div class="sheet">
-        {header_html}
-        {body_html}
-        {footer_html}
-      </div>
-    </body>
-    </html>
-    """
-    # ==============================================================
-
-                "CifraSimplificadaID": "",
-                "UseSimplificada": "",
-                "PauseLabel": "",
-            }
-
-            if item["type"] == "music":
-                base["SongTitle"] = item.get("title", "")
-                base["Artist"] = item.get("artist", "")
-                base["Tom"] = item.get("tom", "")
-                base["BPM"] = item.get("bpm", "")
-                base["CifraDriveID"] = item.get("cifra_id", "")
-                base["CifraSimplificadaID"] = item.get("cifra_simplificada_id", "")
-                base["UseSimplificada"] = "1" if item.get("use_simplificada", False) else "0"
+        with st.expander("Ver / editar cifra (texto)", expanded=True):
+            # Decide qual ID usar
+            if item.get("use_simplificada") and cifra_simplificada_id:
+                current_id = cifra_simplificada_id
+            elif cifra_id:
+                current_id = cifra_id
             else:
-                base["PauseLabel"] = item.get("label", "Pausa")
+                current_id = None
 
-            rows.append(base)
-
-    df_new = pd.DataFrame(rows, columns=SETLIST_COLS)
-    save_setlist_df_to_github(name, df_new)
-
-
-def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFrame):
-    df_sel = load_setlist_df_from_github(setlist_name)
-    if df_sel.empty:
-        return
-
-    df_sel["BlockIndex"] = pd.to_numeric(df_sel["BlockIndex"], errors="coerce").fillna(0).astype(int)
-    df_sel["ItemIndex"] = pd.to_numeric(df_sel["ItemIndex"], errors="coerce").fillna(0).astype(int)
-    df_sel = df_sel.sort_values(["BlockIndex", "ItemIndex"])
-
-    blocks = []
-    for (block_idx, block_name), group in df_sel.groupby(["BlockIndex", "BlockName"], sort=True):
-        items = []
-        for _, row in group.iterrows():
-            if row.get("ItemType") == "pause":
-                items.append({"type": "pause", "label": row.get("PauseLabel", "Pausa")})
+            # Carrega texto
+            if current_id:
+                cifra_text = load_chord_from_drive(current_id)
             else:
-                title = row.get("SongTitle", "")
-                artist = row.get("Artist", "")
-                tom_saved = row.get("Tom", "")
-                bpm_saved = row.get("BPM", "")
+                cifra_text = item.get("text", "")
 
-                cifra_id_saved = str(row.get("CifraDriveID", "")).strip()
-                cifra_simplificada_saved = str(row.get("CifraSimplificadaID", "")).strip()
-
-                use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
-                use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
-
-                song_row = songs_df[songs_df["Título"].astype(str) == str(title)]
-                if not song_row.empty:
-                    sr = song_row.iloc[0]
-                    tom_original = sr.get("Tom_Original", "") or tom_saved
-                    cifra_id_bank = str(sr.get("CifraDriveID", "")).strip()
-                    cifra_simplificada_bank = str(sr.get("CifraSimplificadaID", "")).strip()
-
-                    cifra_id = cifra_id_saved or cifra_id_bank
-                    cifra_simplificada_id = cifra_simplificada_saved or cifra_simplificada_bank
-                else:
-                    tom_original = tom_saved
-                    cifra_id = cifra_id_saved
-                    cifra_simplificada_id = cifra_simplificada_saved
-
-                items.append({
-                    "type": "music",
-                    "title": title,
-                    "artist": artist,
-                    "tom_original": tom_original,
-                    "tom": tom_saved or tom_original,
-                    "bpm": bpm_saved,
-                    "cifra_id": cifra_id,
-                    "cifra_simplificada_id": cifra_simplificada_id,
-                    "use_simplificada": use_simplificada,
-                    "text": "",
-                })
-
-        blocks.append({"name": block_name or f"Bloco {len(blocks) + 1}", "items": items})
-
-    st.session_state.blocks = blocks
-    st.session_state.setlist_name = setlist_name
-    st.session_state.current_item = None
-    st.session_state.selected_block_idx = None
-    st.session_state.selected_item_idx = None
-    st.session_state.screen = "editor"
-
-
-st.success("Cifra atualizada no Drive.")
-                else:
-                    item["text"] = edited
-                    st.success("Cifra salva apenas no setlist (sem arquivo no Drive).")
+            # Ajuste de fonte
+            font_size = st.session_state.cifra_font_size
+            col_font_minus, col_font_plus = st.columns(2)
+            if col_font_minus.button("A﹣", key=f"font_minus_sel_{b_idx}_{i_idx}"):
+                st.session_state.cifra_font_size = max(8, font_size - 1)
+                st.rerun()
+            if col_font_plus.button("A﹢", key=f"font_plus_sel_{b_idx}_{i_idx}"):
+                st.session_state.cifra_font_size = min(24, font_size + 1)
                 st.rerun()
 
+            edited = st.text_area(
+                "Cifra",
+                value=cifra_text,
+                height=300,
+                key=f"cifra_edit_sel_{b_idx}_{i_idx}",
+                label_visibility="collapsed",
+            )
+
+            st.markdown(
+                f"""
+                <style>
+                textarea[data-testid="stTextArea"] {{
+                    font-family: 'Courier New', monospace;
+                    font-size: {font_size}px;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
+                if current_id:
+                    save_chord_to_drive(current_id, edited)
+                    st.success("Cifra atualizada no Drive.")
+                else:
+                    item["text"] = edited
+                    st.success("Cifra salva apenas neste setlist (sem arquivo no Drive).")
+                st.rerun()
+
+        # BPM + TOM
         bpm_val = item.get("bpm", "")
         tom_original = item.get("tom_original", "") or item.get("tom", "")
         tom_val = item.get("tom", tom_original)
 
-        col_bpm, col_tom = st.columns(2)
-        item["bpm"] = col_bpm.text_input(
-            "BPM",
-            value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
-            key=f"bpm_{b_idx}_{i_idx}",
+        lab_bpm, lab_tom = st.columns(2)
+        lab_bpm.markdown(
+            "<p style='text-align:center;font-size:0.8rem;'>BPM</p>",
+            unsafe_allow_html=True,
+        )
+        lab_tom.markdown(
+            "<p style='text-align:center;font-size:0.8rem;'>Tom</p>",
+            unsafe_allow_html=True,
         )
 
-        tone_list = [t for t in TONE_OPTIONS if t.endswith("m")] if tom_original.endswith("m") else [t for t in TONE_OPTIONS if not t.endswith("m")]
+        col_bpm, col_tom = st.columns(2)
+
+        new_bpm = col_bpm.text_input(
+            "BPM",
+            value=str(bpm_val) if bpm_val not in ("", None, 0) else "",
+            key=f"bpm_sel_{b_idx}_{i_idx}",
+            label_visibility="collapsed",
+            placeholder="BPM",
+        )
+        item["bpm"] = new_bpm
+
+        if tom_original.endswith("m"):
+            tone_list = [t for t in TONE_OPTIONS if t.endswith("m")]
+        else:
+            tone_list = [t for t in TONE_OPTIONS if not t.endswith("m")]
+
         if tom_val and tom_val not in tone_list:
             tone_list = [tom_val] + tone_list
+
         idx_tone = tone_list.index(tom_val) if tom_val in tone_list else 0
 
-        selected_tone = col_tom.selectbox("Tom", options=tone_list, index=idx_tone, key=f"tom_{b_idx}_{i_idx}")
+        selected_tone = col_tom.selectbox(
+            "Tom",
+            options=tone_list,
+            index=idx_tone,
+            key=f"tom_select_sel_{b_idx}_{i_idx}",
+            label_visibility="collapsed",
+        )
         if selected_tone != tom_val:
             item["tom"] = selected_tone
             st.session_state.current_item = (b_idx, i_idx)
@@ -812,11 +663,154 @@ st.success("Cifra atualizada no Drive.")
     # ---------- PAUSA ----------
     else:
         st.markdown("**⏸ Pausa**")
-        item["label"] = st.text_input(
+        new_label = st.text_input(
             "Descrição da pausa",
             value=item.get("label", "Pausa"),
             key=f"pause_label_{b_idx}_{i_idx}",
         )
+        item["label"] = new_label
+
+
+def render_setlist_editor_tree():
+    """Estrutura em árvore: Blocos -> Itens. No mobile, usa selectbox pra adicionar música."""
+    blocks = st.session_state.blocks
+    songs_df = st.session_state.songs_df
+
+    st.markdown("### Estrutura da Setlist (modo árvore)")
+
+    if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
+        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
+        st.rerun()
+
+    for b_idx, block in enumerate(blocks):
+        with st.expander(f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}", expanded=False):
+            name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
+
+            new_name = name_col.text_input(
+                "Nome do bloco",
+                value=block.get("name", f"Bloco {b_idx+1}"),
+                key=f"blk_name_{b_idx}",
+                label_visibility="collapsed",
+            )
+            block["name"] = new_name
+
+            if up_col.button("↑", key=f"blk_up_{b_idx}"):
+                move_block(b_idx, -1)
+                st.rerun()
+            if down_col.button("↓", key=f"blk_down_{b_idx}"):
+                move_block(b_idx, 1)
+                st.rerun()
+            if del_col.button("✕", key=f"blk_del_{b_idx}"):
+                delete_block(b_idx)
+                st.rerun()
+
+            st.markdown("---")
+
+            # Lista itens do bloco
+            for i, item in enumerate(block.get("items", [])):
+                col_label, col_btns = st.columns([8, 2])
+
+                if item.get("type") == "music":
+                    title = item.get("title", "Nova música")
+                    artist = item.get("artist", "")
+                    label = f"🎵 {title}" + (f" – {artist}" if artist else "")
+                else:
+                    label = f"⏸ {item.get('label', 'Pausa')}"
+
+                if col_label.button(label, key=f"sel_item_{b_idx}_{i}"):
+                    st.session_state.selected_block_idx = b_idx
+                    st.session_state.selected_item_idx = i
+                    st.session_state.current_item = (b_idx, i)
+                    st.rerun()
+
+                with col_btns:
+                    col_u, col_d, col_x, col_p = st.columns(4)
+                    if col_u.button("↑", key=f"it_up_{b_idx}_{i}"):
+                        move_item(b_idx, i, -1)
+                        st.rerun()
+                    if col_d.button("↓", key=f"it_down_{b_idx}_{i}"):
+                        move_item(b_idx, i, 1)
+                        st.rerun()
+                    if col_x.button("✕", key=f"it_del_{b_idx}_{i}"):
+                        delete_item(b_idx, i)
+                        st.rerun()
+                    if col_p.button("👁", key=f"it_prev_{b_idx}_{i}"):
+                        st.session_state.current_item = (b_idx, i)
+                        st.rerun()
+
+            st.markdown("---")
+
+            col_add_mus, col_add_pause = st.columns(2)
+            if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}"):
+                st.session_state[f"show_add_music_block_{b_idx}"] = True
+            if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}"):
+                block["items"].append({"type": "pause", "label": "Pausa"})
+                st.rerun()
+
+            # ---------- ADD MÚSICA (mobile-safe) ----------
+            if st.session_state.get(f"show_add_music_block_{b_idx}", False):
+                st.markdown("##### Adicionar músicas deste bloco")
+
+                # Monta labels legíveis + map pra índice (evita guardar Series no dict)
+                options = []
+                idx_map = {}
+
+                for idx, row in songs_df.reset_index(drop=True).iterrows():
+                    titulo = str(row.get("Título", "")).strip()
+                    artista = str(row.get("Artista", "")).strip()
+                    tom = str(row.get("Tom_Original", "")).strip()
+
+                    if not titulo:
+                        continue
+
+                    label = f"{titulo} – {artista}" if artista else titulo
+                    if tom:
+                        label += f" ({tom})"
+
+                    options.append(label)
+                    idx_map[label] = int(idx)
+
+                if not options:
+                    st.warning("Banco de músicas vazio ou sem títulos válidos.")
+                else:
+                    # ✅ selectbox (mobile) + botão "Adicionar"
+                    selected_label = st.selectbox(
+                        "Escolha uma música",
+                        options=options,
+                        key=f"song_pick_{b_idx}",
+                    )
+
+                    col_a, col_b = st.columns(2)
+                    if col_a.button("Adicionar", key=f"confirm_add_one_{b_idx}"):
+                        row = songs_df.reset_index(drop=True).iloc[idx_map[selected_label]]
+
+                        cifra_id = str(row.get("CifraDriveID", "")).strip()
+                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
+
+                        new_item = {
+                            "type": "music",
+                            "title": row.get("Título", ""),
+                            "artist": row.get("Artista", ""),
+                            "tom_original": row.get("Tom_Original", ""),
+                            "tom": row.get("Tom_Original", ""),
+                            "bpm": row.get("BPM", ""),
+                            "cifra_id": cifra_id,
+                            "cifra_simplificada_id": cifra_simplificada_id,
+                            "use_simplificada": False,
+                            "text": "",
+                        }
+                        block["items"].append(new_item)
+
+                        # fecha e limpa
+                        st.session_state[f"show_add_music_block_{b_idx}"] = False
+                        st.rerun()
+
+                    if col_b.button("Fechar", key=f"close_add_music_{b_idx}"):
+                        st.session_state[f"show_add_music_block_{b_idx}"] = False
+                        st.rerun()
+
+    # Editor do item selecionado (fora do loop)
+    render_selected_item_editor()
 # ==============================================================
 # 10) BANCO DE MÚSICAS – COM TELA DE CRIAÇÃO / GEMINI
 # ==============================================================

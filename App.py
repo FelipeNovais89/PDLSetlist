@@ -529,6 +529,9 @@ SETLIST_COLS = [
     "CifraSimplificadaID",
     "UseSimplificada",
     "PauseLabel",
+    # ✅ NOVOS CAMPOS (por música)
+    "Obs",
+    "Preparacao",
 ]
 
 
@@ -621,6 +624,9 @@ def save_current_setlist_to_github():
                 "CifraSimplificadaID": "",
                 "UseSimplificada": "",
                 "PauseLabel": "",
+                # ✅ novos
+                "Obs": "",
+                "Preparacao": "",
             }
 
             if item.get("type") == "music":
@@ -631,6 +637,11 @@ def save_current_setlist_to_github():
                 base["CifraDriveID"] = item.get("cifra_id", "")
                 base["CifraSimplificadaID"] = item.get("cifra_simplificada_id", "")
                 base["UseSimplificada"] = "1" if item.get("use_simplificada", False) else "0"
+
+                # ✅ salva OBS/PREPARAÇÃO por música
+                base["Obs"] = item.get("obs", "")
+                base["Preparacao"] = item.get("preparacao", "")
+
             else:
                 base["PauseLabel"] = item.get("label", "Pausa")
 
@@ -667,6 +678,10 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
                 use_simplificada_saved = str(row.get("UseSimplificada", "0")).strip()
                 use_simplificada = use_simplificada_saved in ("1", "true", "True", "Y", "y")
 
+                # ✅ novos campos (por música)
+                obs_saved = str(row.get("Obs", "")).strip()
+                prep_saved = str(row.get("Preparacao", "")).strip()
+
                 # tenta casar com banco
                 song_row = songs_df[songs_df["Título"].astype(str) == str(title)]
                 if not song_row.empty:
@@ -693,6 +708,9 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
                     "cifra_simplificada_id": cifra_simplificada_id,
                     "use_simplificada": use_simplificada,
                     "text": "",
+                    # ✅ carrega OBS/PREPARAÇÃO do setlist
+                    "obs": obs_saved,
+                    "preparacao": prep_saved,
                 })
 
         blocks.append({"name": block_name or f"Bloco {len(blocks) + 1}", "items": items})
@@ -829,6 +847,26 @@ def render_selected_item_editor():
             item["tom"] = selected_tone
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
+
+        # ==========================================================
+        # ✅ NOVO: OBS / PREPARAÇÃO (por música)
+        # ==========================================================
+        st.markdown("---")
+        st.markdown("#### Observações / Preparação")
+
+        item["obs"] = st.text_area(
+            "OBS.:",
+            value=item.get("obs", ""),
+            height=100,
+            key=f"obs_sel_{b_idx}_{i_idx}",
+        )
+
+        item["preparacao"] = st.text_area(
+            "PREPARAÇÃO:",
+            value=item.get("preparacao", ""),
+            height=100,
+            key=f"prep_sel_{b_idx}_{i_idx}",
+        )
 
     else:
         st.markdown("**⏸ Pausa**")
@@ -1114,39 +1152,20 @@ def render_song_database():
 
 
 # ==============================================================
-# 13) PREVIEW (HTML responsivo + portrait/landscape + fontes clamp)
+# 13) PREVIEW (HTML simples) — ✅ com OBS/PREPARAÇÃO
 # ==============================================================
 
-def get_footer_context(blocks, cur_block_idx, cur_item_idx):
-    """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
-    if cur_block_idx is None or cur_item_idx is None:
-        return "none", None
-
-    b = cur_block_idx
-    i = cur_item_idx + 1
-
-    while b < len(blocks):
-        items = blocks[b].get("items", [])
-        if i < len(items):
-            return "next", items[i]
-        b += 1
-        i = 0
-
-    return "none", None
-
-
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    # ------------------------
-    # DADOS DO CABEÇALHO
-    # ------------------------
     title = (item.get("title", "") if item.get("type") == "music" else item.get("label", "Pausa")) or ""
     artist = item.get("artist", "") if item.get("type") == "music" else ""
-    bpm = (item.get("bpm", "") if item.get("type") == "music" else "") or ""
-    tom = (item.get("tom", "") if item.get("type") == "music" else "") or ""
+    bpm = item.get("bpm", "") if item.get("type") == "music" else ""
+    tom = item.get("tom", "") if item.get("type") == "music" else ""
 
-    # ------------------------
-    # CIFRA (original/simplificada)
-    # ------------------------
+    # ✅ OBS / PREPARAÇÃO do item atual
+    obs = (item.get("obs", "") if item.get("type") == "music" else "") or ""
+    prep = (item.get("preparacao", "") if item.get("type") == "music" else "") or ""
+
+    # cifra
     cifra_txt = ""
     if item.get("type") == "music":
         use_s = item.get("use_simplificada", False)
@@ -1158,246 +1177,160 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             cifra_txt = item.get("text", "")
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
-    # ------------------------
-    # PRÓXIMO
-    # ------------------------
+    # ✅ próxima música (com tom/bpm/artist)
     next_title = ""
+    next_artist = ""
+    next_tom = ""
+    next_bpm = ""
+
     if footer_mode == "next" and footer_next_item:
         if footer_next_item.get("type") == "music":
-            next_title = footer_next_item.get("title", "")
+            next_title = footer_next_item.get("title", "") or ""
+            next_artist = footer_next_item.get("artist", "") or ""
+            next_tom = footer_next_item.get("tom", "") or footer_next_item.get("tom_original", "") or ""
+            next_bpm = footer_next_item.get("bpm", "") or ""
         else:
-            next_title = footer_next_item.get("label", "Pausa")
+            next_title = footer_next_item.get("label", "Pausa") or ""
 
-    # Escapa básico (evita quebrar HTML com caracteres especiais)
     def esc(s: str) -> str:
-        s = str(s or "")
+        # escape simples p/ HTML
         return (
-            s.replace("&", "&amp;")
-             .replace("<", "&lt;")
-             .replace(">", "&gt;")
+            (s or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
         )
-
-    title_e = esc(title)
-    artist_e = esc(artist)
-    block_e = esc(block_name)
-    bpm_e = esc(bpm) if bpm else "-"
-    tom_e = esc(tom) if tom else "-"
-    cifra_e = esc(cifra_show)
-    next_e = esc(next_title)
 
     html = f"""
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
-  :root {{
-    /* ====== TIPOGRAFIA RESPONSIVA (min, ideal, max) ====== */
-    --fs-title: clamp(16px, 2.4vw, 26px);
-    --fs-sub:   clamp(11px, 1.3vw, 14px);
-    --fs-meta:  clamp(11px, 1.2vw, 14px);
-    --fs-chord: clamp(11px, 1.05vw, 15px);
-    --fs-foot:  clamp(10px, 1.1vw, 13px);
-
-    /* ====== ESPAÇAMENTOS ====== */
-    --pad: clamp(10px, 1.8vw, 18px);
-    --radius: 14px;
-    --border: 1px solid #e9e9e9;
-  }}
-
-  html, body {{
-    height: 100%;
-  }}
-
-  body {{
-    font-family: Arial, sans-serif;
-    margin: 0;
-    padding: 0;
-    background: #ffffff;
-    color: #111;
-  }}
-
-  /* “Página” responsiva (fica tipo PDF, mas adaptável) */
-  .sheet {{
-    width: 96vw;             /* %/vw: ocupa quase toda a largura disponível */
-    max-width: 980px;        /* limite p/ desktop */
-    margin: 0 auto;
-    padding: var(--pad);
-    box-sizing: border-box;
-  }}
-
-  .top {{
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: start;
-    gap: clamp(8px, 1.2vw, 14px);
-    border-bottom: 1px solid #ddd;
-    padding-bottom: clamp(8px, 1.1vw, 12px);
-    margin-bottom: clamp(8px, 1.1vw, 12px);
-  }}
-
-  .title {{
-    font-size: var(--fs-title);
-    font-weight: 800;
-    margin: 0;
-    line-height: 1.1;
-    word-break: break-word;
-  }}
-
-  .artist {{
-    font-size: var(--fs-sub);
-    margin-top: 4px;
-    color: #444;
-    line-height: 1.2;
-  }}
-
-  /* Meta em “colunas”: BPM e TOM lado a lado */
-  .meta {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: clamp(8px, 1vw, 14px);
-    font-size: var(--fs-meta);
-    color: #222;
-    text-align: right;
-    min-width: 180px;
-  }}
-
-  .metaCard {{
-    border: var(--border);
-    border-radius: var(--radius);
-    padding: clamp(8px, 1vw, 12px);
-    background: #fff;
-  }}
-
-  .metaCard b {{
-    display: block;
-    font-size: var(--fs-meta);
-    margin-bottom: 6px;
-  }}
-
-  /* CIFRA: ocupa altura baseada na tela (vh) */
-  .cifra {{
-    font-family: "Courier New", monospace;
-    font-size: var(--fs-chord);
-    line-height: 1.25;
-    white-space: pre-wrap;
-    border: var(--border);
-    padding: clamp(10px, 1.2vw, 14px);
-    border-radius: var(--radius);
-
-    /* altura responsiva */
-    min-height: 42vh;
-    max-height: 72vh;
-
-    overflow: auto;
-    box-sizing: border-box;
-  }}
-
-  .footer {{
-    margin-top: clamp(8px, 1.1vw, 12px);
-    font-size: var(--fs-foot);
-    color: #555;
-    display: flex;
-    justify-content: space-between;
-    border-top: 1px solid #eee;
-    padding-top: clamp(8px, 1.1vw, 12px);
-    gap: 12px;
-  }}
-
-  /* ===========================
-     PORTRAIT (celular em pé)
-     =========================== */
-  @media (orientation: portrait) {{
+    body {{
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: white;
+        color: #111;
+    }}
     .sheet {{
-      width: 98vw;
-      max-width: 980px;
-      padding: clamp(10px, 3vw, 18px);
-    }}
-
-    /* Empilha meta abaixo do título (melhor no mobile) */
-    .top {{
-      grid-template-columns: 1fr;
-    }}
-
-    .meta {{
-      text-align: left;
-      min-width: 0;
-      grid-template-columns: 1fr 1fr; /* mantém BPM/TOM lado a lado */
-    }}
-
-    .cifra {{
-      min-height: 48vh;
-      max-height: 68vh;
-    }}
-  }}
-
-  /* ===========================
-     LANDSCAPE (celular deitado / tela larga)
-     =========================== */
-  @media (orientation: landscape) {{
-    .sheet {{
-      width: 96vw;
-      max-width: 1200px; /* mais largo em landscape */
+        width: 100%;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 14px 14px 24px 14px;
     }}
 
     .top {{
-      grid-template-columns: 1fr auto;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: start;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 8px;
+        margin-bottom: 8px;
+    }}
+    .title {{
+        font-size: 18px;
+        font-weight: 800;
+        margin: 0;
+        line-height: 1.1;
+    }}
+    .artist {{
+        font-size: 12px;
+        margin-top: 3px;
+        color: #444;
+    }}
+    .kv {{
+        text-align: right;
+        font-size: 12px;
+        color: #222;
+        min-width: 70px;
+    }}
+    .kv b {{
+        display:block;
+        font-size: 11px;
+        margin-bottom: 2px;
+        color: #333;
     }}
 
-    .meta {{
-      min-width: 240px;
+    .section-title {{
+        font-size: 12px;
+        font-weight: 800;
+        margin: 10px 0 6px 0;
+    }}
+    .box {{
+        border-top: 1px solid #ddd;
+        border-bottom: 1px solid #ddd;
+        padding: 8px 0;
+        font-size: 12px;
+        color: #222;
+        white-space: pre-wrap;
     }}
 
     .cifra {{
-      min-height: 55vh;
-      max-height: 78vh;
+        margin-top: 10px;
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.25;
+        white-space: pre-wrap;
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 10px;
+        min-height: 420px;
     }}
-  }}
 
-  /* ===========================
-     TELAS MUITO PEQUENAS
-     (garante legibilidade)
-     =========================== */
-  @media (max-width: 420px) {{
-    .meta {{
-      grid-template-columns: 1fr; /* BPM em cima, Tom embaixo */
+    .next {{
+        margin-top: 12px;
+        border-top: 1px solid #ddd;
+        padding-top: 10px;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: start;
     }}
-  }}
+    .next .title {{
+        font-size: 14px;
+        font-weight: 800;
+    }}
 </style>
 </head>
 <body>
   <div class="sheet">
+
     <div class="top">
       <div>
-        <div class="title">{title_e}</div>
-        <div class="artist">{artist_e}</div>
-        <div class="artist">Bloco: {block_e}</div>
+        <div class="title">{esc(title)}</div>
+        <div class="artist">{esc(artist)}</div>
       </div>
 
-      <div class="meta">
-        <div class="metaCard">
-          <b>BPM</b>
-          {bpm_e}
-        </div>
-        <div class="metaCard">
-          <b>Tom</b>
-          {tom_e}
-        </div>
+      <div class="kv"><b>TOM</b>{esc(tom) if tom else "-"}</div>
+      <div class="kv"><b>BPM</b>{esc(bpm) if bpm else "-"}</div>
+    </div>
+
+    <div class="section-title">OBS.:</div>
+    <div class="box">{esc(obs) if obs.strip() else ""}</div>
+
+    <div class="cifra">{esc(cifra_show)}</div>
+
+    <div class="section-title">PREPARAÇÃO:</div>
+    <div class="box">{esc(prep) if prep.strip() else ""}</div>
+
+    <div class="next">
+      <div>
+        <div class="title">{esc(next_title) if next_title else ""}</div>
+        <div class="artist">{esc(next_artist) if next_artist else ""}</div>
       </div>
+      <div class="kv"><b>TOM</b>{esc(next_tom) if next_tom else ("-" if next_title else "")}</div>
+      <div class="kv"><b>BPM</b>{esc(next_bpm) if next_bpm else ("-" if next_title else "")}</div>
     </div>
 
-    <div class="cifra">{cifra_e}</div>
-
-    <div class="footer">
-      <div>Pagode do LEC</div>
-      <div>{("Próxima: " + next_e) if next_title else ""}</div>
-    </div>
   </div>
 </body>
 </html>
 """
     return html
+
 
 
 # ==============================================================

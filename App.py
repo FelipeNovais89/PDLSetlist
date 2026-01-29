@@ -1352,7 +1352,235 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 """
     return html
 
+# ==============================================================
+# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE)
+# ==============================================================
 
+import streamlit.components.v1 as components
+
+def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
+    """
+    Viewer em estilo SLIDES (um por tela) com swipe esquerda/direita.
+    slides: list[str]  -> cada item é o HTML completo do preview (cifra)
+    titles: list[str]  -> título de cada slide (ex.: "Música - Artista")
+    start_index: int   -> slide inicial
+    """
+    if not slides:
+        st.info("Sem itens para exibir em fullscreen.")
+        return
+
+    if titles is None:
+        titles = [f"{i+1}" for i in range(len(slides))]
+
+    if len(titles) != len(slides):
+        titles = (titles + [f"{i+1}" for i in range(len(slides))])[: len(slides)]
+
+    payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
+    payload_json = json.dumps(payload)
+
+    html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  html, body {{
+    margin:0; padding:0; height:100%; width:100%;
+    background:#000; overflow:hidden;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }}
+
+  .topbar {{
+    position:fixed; top:0; left:0; right:0;
+    height:54px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 12px;
+    background:rgba(0,0,0,0.55);
+    z-index:10;
+    box-sizing:border-box;
+  }}
+
+  .title {{
+    color:#fff;
+    font-size:14px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:70vw;
+    opacity:0.95;
+  }}
+
+  .btn {{
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    color:#fff;
+    border-radius:10px;
+    padding:8px 10px;
+    font-size:14px;
+  }}
+
+  .stage {{
+    position:fixed;
+    top:54px; left:0; right:0; bottom:0;
+    background:#050505;
+    overflow:hidden;
+    touch-action: pan-y;
+  }}
+
+  .strip {{
+    display:flex;
+    height:100%;
+    width:100%;
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }}
+
+  .slide {{
+    flex: 0 0 100%;
+    height:100%;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px;
+    box-sizing:border-box;
+  }}
+
+  .paper {{
+    max-width: 980px;
+    margin: 0 auto;
+    background: #0f0f0f;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 16px;
+    padding: 16px;
+    box-sizing:border-box;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    color: #fff;
+  }}
+
+  .dots {{
+    position:fixed;
+    bottom:10px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    gap:6px;
+    z-index: 10;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.55);
+  }}
+
+  .dot {{
+    width:7px; height:7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+  }}
+
+  .dot.active {{
+    background: rgba(255,255,255,0.85);
+  }}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn" id="prevBtn">◀</button>
+      <button class="btn" id="nextBtn">▶</button>
+    </div>
+    <div class="title" id="title"></div>
+    <button class="btn" id="closeBtn">Fechar</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="strip" id="strip"></div>
+  </div>
+
+  <div class="dots" id="dots"></div>
+
+<script>
+  const items = {payload_json};
+  let idx = {int(start_index)};
+
+  const strip = document.getElementById("strip");
+  const title = document.getElementById("title");
+  const dots = document.getElementById("dots");
+  const stage = document.getElementById("stage");
+
+  function buildSlides() {{
+    strip.innerHTML = "";
+    dots.innerHTML = "";
+    items.forEach((it, i) => {{
+      const s = document.createElement("div");
+      s.className = "slide";
+      const p = document.createElement("div");
+      p.className = "paper";
+      p.innerHTML = it.html;
+      s.appendChild(p);
+      strip.appendChild(s);
+
+      const d = document.createElement("div");
+      d.className = "dot";
+      d.onclick = () => goTo(i);
+      dots.appendChild(d);
+    }});
+  }}
+
+  function updateUI() {{
+    title.textContent = `${{idx+1}}/${{items.length}} • ${{items[idx].title}}`;
+    [...dots.children].forEach((d, i) => d.classList.toggle("active", i === idx));
+    strip.style.transform = `translateX(${{-idx * 100}}%)`;
+    const currentSlide = strip.children[idx];
+    if (currentSlide) currentSlide.scrollTo(0, 0);
+  }}
+
+  function goTo(i) {{
+    idx = (i + items.length) % items.length;
+    updateUI();
+  }}
+  function next() {{ goTo(idx + 1); }}
+  function prev() {{ goTo(idx - 1); }}
+
+  document.getElementById("nextBtn").onclick = next;
+  document.getElementById("prevBtn").onclick = prev;
+
+  // Streamlit não fecha componente via JS puro
+  document.getElementById("closeBtn").onclick = () => {{
+    title.textContent = "Para sair: clique em 'Voltar' no app.";
+    setTimeout(() => updateUI(), 1200);
+  }};
+
+  // Swipe horizontal
+  let x0=null, y0=null, t0=null;
+  stage.addEventListener("touchstart", (e) => {{
+    const t = e.touches[0];
+    x0=t.clientX; y0=t.clientY; t0=Date.now();
+  }}, {{passive:true}});
+
+  stage.addEventListener("touchend", (e) => {{
+    if (x0===null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0;
+    const dy = t.clientY - y0;
+    const dt = Date.now() - t0;
+
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 70 && dt < 800) {{
+      if (dx < 0) next(); else prev();
+    }}
+    x0=null; y0=null; t0=null;
+  }}, {{passive:true}});
+
+  document.addEventListener("keydown", (e) => {{
+    if (e.key === "ArrowRight") next();
+    if (e.key === "ArrowLeft") prev();
+  }});
+
+  buildSlides();
+  goTo(idx);
+</script>
+</body>
+</html>
+"""
+    components.html(html, height=height, scrolling=False)
 
 # ==============================================================
 # 14) HOME
@@ -1391,7 +1619,7 @@ def render_home():
 
 
 # ==============================================================
-# 15) MAIN
+# 15) MAIN  (SEÇÃO INTEIRA — CORRIGIDA COM FULLSCREEN SLIDES/SWIPE)
 # ==============================================================
 
 def main():
@@ -1438,7 +1666,7 @@ def main():
         render_song_database()
 
     # ==========================================================
-    # COLUNA DIREITA — PREVIEW (CORRIGIDO)
+    # COLUNA DIREITA — PREVIEW (COM FULLSCREEN SLIDES)
     # ==========================================================
     with right_col:
         st.subheader("Preview")
@@ -1495,29 +1723,77 @@ def main():
                     break
 
         # --------------------------------------------------
-        # RENDERIZAÇÃO FINAL DO PREVIEW
+        # RENDERIZAÇÃO FINAL DO PREVIEW (COM FULLSCREEN SLIDES)
         # --------------------------------------------------
+
+        # estado do fullscreen (persistente)
+        if "pdl_fullscreen" not in st.session_state:
+            st.session_state.pdl_fullscreen = False
+
+        # botões de controle
+        b1, b2 = st.columns([1, 1])
+        with b1:
+            if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True, key="btn_fs_on"):
+                st.session_state.pdl_fullscreen = True
+        with b2:
+            if st.button("⬅️ Voltar", use_container_width=True, key="btn_fs_off"):
+                st.session_state.pdl_fullscreen = False
+
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
-        else:
-            footer_mode, footer_next_item = get_footer_context(
-                blocks,
-                cur_block_idx,
-                cur_item_idx,
-            )
+            return
 
-            html = build_sheet_page_html(
-                current_item,
-                footer_mode,
-                footer_next_item,
-                current_block_name,
-            )
+        footer_mode, footer_next_item = get_footer_context(
+            blocks,
+            cur_block_idx,
+            cur_item_idx,
+        )
 
+        html_current = build_sheet_page_html(
+            current_item,
+            footer_mode,
+            footer_next_item,
+            current_block_name,
+        )
+
+        # ---------- MODO NORMAL ----------
+        if not st.session_state.pdl_fullscreen:
             st.components.v1.html(
-                html,
+                html_current,
                 height=1200,
                 scrolling=True,
             )
+            return
+
+        # ---------- MODO FULLSCREEN SLIDES (ATUAL + PRÓXIMA) ----------
+        def _title_from_item(it):
+            if isinstance(it, dict):
+                s = (it.get("title") or it.get("song") or "").strip()
+                a = (it.get("artist") or "").strip()
+                t = f"{s} - {a}".strip(" -")
+                return t if t else "Cifra"
+            return "Cifra"
+
+        slides = [html_current]
+        titles = [_title_from_item(current_item)]
+
+        if footer_next_item is not None:
+            html_next = build_sheet_page_html(
+                footer_next_item,
+                footer_mode,
+                None,                 # não precisa "próximo do próximo" para o swipe básico
+                current_block_name,
+            )
+            slides.append(html_next)
+            titles.append(_title_from_item(footer_next_item))
+
+        # OBS: requer que você tenha colado a função fullscreen_slides_viewer
+        fullscreen_slides_viewer(
+            slides=slides,
+            titles=titles,
+            start_index=0,
+            height=900
+        )
 
 
 # ==============================================================

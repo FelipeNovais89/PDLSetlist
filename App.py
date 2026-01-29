@@ -934,10 +934,6 @@ def render_setlist_editor_tree():
         for label in selected:
             row = option_map[label]
 
-            cifra_id = str(row.get("CifraDriveID", "")).strip()
-            cifra_simplificada_id = str(
-                row.get("CifraSimplificadaID", "")
-            ).strip()
 # ==============================================================
 # 11) EDITOR EM ÁRVORE (SETLIST)
 # ==============================================================

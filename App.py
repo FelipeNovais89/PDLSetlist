@@ -1292,12 +1292,13 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     .cifra {{
         margin-top: 10px;
         font-family: "Courier New", monospace;
-        font-size: 12px;
+        white-space: pre;
+        overflow-x: auto;
+        font-size: clamp(3px, 1.2vw, 13px);
         line-height: 1.25;
-        white-space: pre-wrap;
-        border: 1px solid #eee;
-        padding: 10px;
-        border-radius: 10px;
+        border: 0.5px solid #eee;
+        padding: 5px;
+        border-radius: 5px;
         min-height: 420px;
     }}
 

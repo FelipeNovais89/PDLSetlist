@@ -1342,13 +1342,9 @@ body {{
 
 </div>
 
-
-<!-- ========================================================= -->
-<!-- AUTO FIT DA CIFRA (REDUZ FONTE ATÉ CABER NA LARGURA) -->
-<!-- ========================================================= -->
-
 <script>
 (function() {{
+
   const box = document.querySelector('.cifra');
   if (!box) return;
 
@@ -1372,7 +1368,8 @@ body {{
 
   window.addEventListener('load', fit);
   window.addEventListener('resize', fit);
-})();
+
+}})();
 </script>
 
 </body>

@@ -1293,8 +1293,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         margin-top: 10px;
         font-family: "Courier New", monospace;
         white-space: pre;
-        overflow-x: auto;
-        font-size: clamp(3px, 1.2vw, 13px);
+        overflow-x: hidden;
+        overflow-y: visible;
+        font-size: clamp(12px, 1.2vw, 16px);
         line-height: 1.25;
         border: 0.5px solid #eee;
         padding: 5px;

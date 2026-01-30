@@ -1348,11 +1348,61 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       <div class="kv"><b>BPM</b>{esc(next_bpm) if next_bpm else ("-" if next_title else "")}</div>
     </div>
 
-  </div>
+  </div> <!-- fecha .sheet -->
+
+<script>
+(function() {
+  const box = document.querySelector('.cifra');
+  if (!box) return;
+
+  const MAX_PX = 14;
+  const MIN_PX = 8;
+  const STEP   = 0.5;
+  const PAD_SAFETY = 2;
+
+  function fits() {
+    return (box.scrollWidth <= (box.clientWidth - PAD_SAFETY));
+  }
+
+  function apply(px) {
+    box.style.fontSize = px + 'px';
+  }
+
+  function fitOnce() {
+    let px = MAX_PX;
+    apply(px);
+
+    if (fits()) return;
+
+    while (px > MIN_PX && !fits()) {
+      px -= STEP;
+      apply(px);
+    }
+  }
+
+  function fit() {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        fitOnce();
+      });
+    });
+  }
+
+  let t = null;
+  function debounceFit() {
+    clearTimeout(t);
+    t = setTimeout(fit, 80);
+  }
+
+  window.addEventListener('resize', debounceFit, { passive: true });
+  window.addEventListener('orientationchange', debounceFit, { passive: true });
+
+  fit();
+})();
+</script>
+
 </body>
 </html>
-"""
-    return html
 
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe

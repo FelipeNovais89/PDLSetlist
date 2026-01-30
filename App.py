@@ -1417,7 +1417,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .title {{
     color:#fff;
-    font-size: clamp(6px, 5vw, 16px);
+    font-size: clamp(6px, 2vw, 16px);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -1429,7 +1429,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.18);
     color:#fff;
-    border-radius: clamp(2px, 2vw, 16px);
+    border-radius: clamp(0.5px, 0.5vw, 16px);
     padding: clamp(3.5px, 0.5vh, 8px) clamp(4px, 0.75vw, 12px);
     font-size: clamp(2.5px, 1vw, 8px);
     cursor:pointer;

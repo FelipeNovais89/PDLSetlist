@@ -1403,6 +1403,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 </body>
 </html>
+"""
+    return html
 
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe

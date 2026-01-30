@@ -1353,7 +1353,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     return html
 
 # ==============================================================
-# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE)
+# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
 
 import streamlit.components.v1 as components
@@ -1361,9 +1361,8 @@ import streamlit.components.v1 as components
 def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     """
     Viewer em estilo SLIDES (um por tela) com swipe esquerda/direita.
-    slides: list[str]  -> cada item é o HTML completo do preview (cifra)
-    titles: list[str]  -> título de cada slide (ex.: "Música - Artista")
-    start_index: int   -> slide inicial
+    - Usa Fullscreen API (requestFullscreen) -> parecido com F11.
+    - No mobile, não remove 100% a URL/UI do navegador (limitação do Chrome).
     """
     if not slides:
         st.info("Sem itens para exibir em fullscreen.")
@@ -1378,6 +1377,12 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
     payload_json = json.dumps(payload)
 
+    start_index = int(start_index) if isinstance(start_index, (int, float, str)) else 0
+    if start_index < 0:
+        start_index = 0
+    if start_index >= len(slides):
+        start_index = 0
+
     html = f"""
 <!doctype html>
 <html>
@@ -1391,14 +1396,23 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   }}
 
+  /* Container ocupa tudo (tenta "parecer F11") */
+  .app {{
+    position:fixed;
+    inset:0;
+    background:#000;
+    overflow:hidden;
+  }}
+
   .topbar {{
     position:fixed; top:0; left:0; right:0;
     height:54px;
     display:flex; align-items:center; justify-content:space-between;
     padding:0 12px;
-    background:rgba(0,0,0,0.55);
+    background:rgba(0,0,0,0.62);
     z-index:10;
     box-sizing:border-box;
+    backdrop-filter: blur(6px);
   }}
 
   .title {{
@@ -1407,7 +1421,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
-    max-width:70vw;
+    max-width:62vw;
     opacity:0.95;
   }}
 
@@ -1418,6 +1432,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     border-radius:10px;
     padding:8px 10px;
     font-size:14px;
+    cursor:pointer;
   }}
 
   .stage {{
@@ -1425,7 +1440,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     top:54px; left:0; right:0; bottom:0;
     background:#050505;
     overflow:hidden;
-    touch-action: pan-y;
+    touch-action: pan-y; /* permite scroll vertical dentro do slide */
   }}
 
   .strip {{
@@ -1445,16 +1460,24 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     box-sizing:border-box;
   }}
 
+  /* Aqui a "folha" fica branca como PDF */
   .paper {{
-    max-width: 980px;
+    max-width: 1040px;
     margin: 0 auto;
-    background: #0f0f0f;
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 16px;
-    padding: 16px;
+    background: #fff;
+    color: #111;
+    border-radius: 12px;
+    padding: 0;
     box-sizing:border-box;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-    color: #fff;
+    overflow: hidden;
+  }}
+
+  /* Usa iframe pra isolar o CSS de cada página e não quebrar teu layout */
+  .paper iframe {{
+    width:100%;
+    border:0;
+    display:block;
   }}
 
   .dots {{
@@ -1467,7 +1490,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     z-index: 10;
     padding: 6px 10px;
     border-radius: 999px;
-    background: rgba(0,0,0,0.55);
+    background: rgba(0,0,0,0.62);
   }}
 
   .dot {{
@@ -1477,25 +1500,37 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   }}
 
   .dot.active {{
-    background: rgba(255,255,255,0.85);
+    background: rgba(255,255,255,0.90);
+  }}
+
+  /* Em fullscreen, tenta reduzir o header pra ganhar espaço */
+  :fullscreen .topbar {{
+    background: rgba(0,0,0,0.40);
   }}
 </style>
 </head>
 <body>
-  <div class="topbar">
-    <div style="display:flex; gap:8px; align-items:center;">
-      <button class="btn" id="prevBtn">◀</button>
-      <button class="btn" id="nextBtn">▶</button>
+  <div class="app" id="appRoot">
+    <div class="topbar">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn" id="prevBtn">◀</button>
+        <button class="btn" id="nextBtn">▶</button>
+      </div>
+
+      <div class="title" id="title"></div>
+
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn" id="fsBtn">Fullscreen</button>
+        <button class="btn" id="exitBtn">Sair</button>
+      </div>
     </div>
-    <div class="title" id="title"></div>
-    <button class="btn" id="closeBtn">Fechar</button>
-  </div>
 
-  <div class="stage" id="stage">
-    <div class="strip" id="strip"></div>
-  </div>
+    <div class="stage" id="stage">
+      <div class="strip" id="strip"></div>
+    </div>
 
-  <div class="dots" id="dots"></div>
+    <div class="dots" id="dots"></div>
+  </div>
 
 <script>
   const items = {payload_json};
@@ -1505,16 +1540,50 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   const title = document.getElementById("title");
   const dots = document.getElementById("dots");
   const stage = document.getElementById("stage");
+  const appRoot = document.getElementById("appRoot");
+
+  function tryEnterFullscreen() {{
+    try {{
+      const el = appRoot;
+      if (document.fullscreenElement) return;
+      if (el.requestFullscreen) el.requestFullscreen();
+    }} catch (e) {{}}
+  }}
+
+  function exitFullscreen() {{
+    try {{
+      if (document.fullscreenElement && document.exitFullscreen) {{
+        document.exitFullscreen();
+      }}
+    }} catch (e) {{}}
+  }}
 
   function buildSlides() {{
     strip.innerHTML = "";
     dots.innerHTML = "";
+
     items.forEach((it, i) => {{
       const s = document.createElement("div");
       s.className = "slide";
+
       const p = document.createElement("div");
       p.className = "paper";
-      p.innerHTML = it.html;
+
+      // iframe isola CSS do HTML de cada página (evita bagunçar layout)
+      const fr = document.createElement("iframe");
+      fr.setAttribute("sandbox", "allow-same-origin"); // suficiente p/ srcdoc
+      fr.srcdoc = it.html;
+
+      // Ajusta altura do iframe pra ocupar a tela (sem cortar)
+      fr.onload = () => {{
+        try {{
+          // altura mínima: stage height - padding
+          const h = Math.max(window.innerHeight - 54 - 40, 600);
+          fr.style.height = h + "px";
+        }} catch (e) {{}}
+      }};
+
+      p.appendChild(fr);
       s.appendChild(p);
       strip.appendChild(s);
 
@@ -1529,6 +1598,8 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     title.textContent = `${{idx+1}}/${{items.length}} • ${{items[idx].title}}`;
     [...dots.children].forEach((d, i) => d.classList.toggle("active", i === idx));
     strip.style.transform = `translateX(${{-idx * 100}}%)`;
+
+    // sobe pro topo do slide atual
     const currentSlide = strip.children[idx];
     if (currentSlide) currentSlide.scrollTo(0, 0);
   }}
@@ -1543,13 +1614,20 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   document.getElementById("nextBtn").onclick = next;
   document.getElementById("prevBtn").onclick = prev;
 
-  // Streamlit não fecha componente via JS puro
-  document.getElementById("closeBtn").onclick = () => {{
-    title.textContent = "Para sair: clique em 'Voltar' no app.";
-    setTimeout(() => updateUI(), 1200);
+  // Fullscreen real (parecido com F11)
+  document.getElementById("fsBtn").onclick = () => {{
+    tryEnterFullscreen();
   }};
 
-  // Swipe horizontal
+  // "Sair" tenta sair do fullscreen e sugere voltar no app
+  document.getElementById("exitBtn").onclick = () => {{
+    exitFullscreen();
+    // Não dá pra "fechar" componente Streamlit via JS puro.
+    // O app precisa ter um botão Python "Voltar" que desative o modo fullscreen.
+    title.textContent = "Saindo… use o botão 'Voltar' do app";
+  }};
+
+  // Swipe horizontal (sem atrapalhar scroll vertical)
   let x0=null, y0=null, t0=null;
   stage.addEventListener("touchstart", (e) => {{
     const t = e.touches[0];
@@ -1572,10 +1650,23 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   document.addEventListener("keydown", (e) => {{
     if (e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") prev();
+    if (e.key === "Escape") exitFullscreen();
+  }});
+
+  // Recalcula altura quando gira a tela
+  window.addEventListener("resize", () => {{
+    const iframes = strip.querySelectorAll("iframe");
+    iframes.forEach(fr => {{
+      const h = Math.max(window.innerHeight - 54 - 40, 600);
+      fr.style.height = h + "px";
+    }});
   }});
 
   buildSlides();
   goTo(idx);
+
+  // Importante: fullscreen só funciona com "gesto do usuário".
+  // Então a gente NÃO força automaticamente.
 </script>
 </body>
 </html>
@@ -1619,7 +1710,7 @@ def render_home():
 
 
 # ==============================================================
-# 15) MAIN  (SEÇÃO INTEIRA — CORRIGIDA COM FULLSCREEN SLIDES/SWIPE)
+# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES com TODAS as páginas)
 # ==============================================================
 
 def main():
@@ -1673,59 +1764,6 @@ def main():
 
         blocks = st.session_state.blocks
 
-        current_item = None
-        current_block_name = ""
-        cur_block_idx = None
-        cur_item_idx = None
-
-        # --------------------------------------------------
-        # PRIORIDADE 1 — ITEM SELECIONADO NO EDITOR
-        # --------------------------------------------------
-        sel_b = st.session_state.selected_block_idx
-        sel_i = st.session_state.selected_item_idx
-
-        if sel_b is not None and sel_i is not None:
-            if (
-                0 <= sel_b < len(blocks)
-                and 0 <= sel_i < len(blocks[sel_b]["items"])
-            ):
-                current_item = blocks[sel_b]["items"][sel_i]
-                current_block_name = blocks[sel_b]["name"]
-                cur_block_idx = sel_b
-                cur_item_idx = sel_i
-
-        # --------------------------------------------------
-        # PRIORIDADE 2 — ITEM MARCADO COM 👁 (current_item)
-        # --------------------------------------------------
-        if current_item is None:
-            cur = st.session_state.current_item
-            if cur is not None:
-                b_idx, i_idx = cur
-                if (
-                    0 <= b_idx < len(blocks)
-                    and 0 <= i_idx < len(blocks[b_idx]["items"])
-                ):
-                    current_item = blocks[b_idx]["items"][i_idx]
-                    current_block_name = blocks[b_idx]["name"]
-                    cur_block_idx = b_idx
-                    cur_item_idx = i_idx
-
-        # --------------------------------------------------
-        # PRIORIDADE 3 — PRIMEIRA MÚSICA DO SETLIST
-        # --------------------------------------------------
-        if current_item is None:
-            for b_idx, block in enumerate(blocks):
-                if block["items"]:
-                    current_item = block["items"][0]
-                    current_block_name = block["name"]
-                    cur_block_idx = b_idx
-                    cur_item_idx = 0
-                    break
-
-        # --------------------------------------------------
-        # RENDERIZAÇÃO FINAL DO PREVIEW (COM FULLSCREEN SLIDES)
-        # --------------------------------------------------
-
         # estado do fullscreen (persistente)
         if "pdl_fullscreen" not in st.session_state:
             st.session_state.pdl_fullscreen = False
@@ -1735,29 +1773,60 @@ def main():
         with b1:
             if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True, key="btn_fs_on"):
                 st.session_state.pdl_fullscreen = True
+                st.rerun()
         with b2:
             if st.button("⬅️ Voltar", use_container_width=True, key="btn_fs_off"):
                 st.session_state.pdl_fullscreen = False
+                st.rerun()
+
+        # --------------------------------------------------
+        # Seleção do "current_item" (para preview normal)
+        # --------------------------------------------------
+        current_item = None
+        current_block_name = ""
+        cur_block_idx = None
+        cur_item_idx = None
+
+        sel_b = st.session_state.selected_block_idx
+        sel_i = st.session_state.selected_item_idx
+
+        if sel_b is not None and sel_i is not None:
+            if 0 <= sel_b < len(blocks) and 0 <= sel_i < len(blocks[sel_b]["items"]):
+                current_item = blocks[sel_b]["items"][sel_i]
+                current_block_name = blocks[sel_b]["name"]
+                cur_block_idx = sel_b
+                cur_item_idx = sel_i
+
+        if current_item is None:
+            cur = st.session_state.current_item
+            if cur is not None:
+                b_idx, i_idx = cur
+                if 0 <= b_idx < len(blocks) and 0 <= i_idx < len(blocks[b_idx]["items"]):
+                    current_item = blocks[b_idx]["items"][i_idx]
+                    current_block_name = blocks[b_idx]["name"]
+                    cur_block_idx = b_idx
+                    cur_item_idx = i_idx
+
+        if current_item is None:
+            for b_idx, block in enumerate(blocks):
+                if block["items"]:
+                    current_item = block["items"][0]
+                    current_block_name = block["name"]
+                    cur_block_idx = b_idx
+                    cur_item_idx = 0
+                    break
 
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
             return
 
-        footer_mode, footer_next_item = get_footer_context(
-            blocks,
-            cur_block_idx,
-            cur_item_idx,
-        )
-
-        html_current = build_sheet_page_html(
-            current_item,
-            footer_mode,
-            footer_next_item,
-            current_block_name,
-        )
-
-        # ---------- MODO NORMAL ----------
+        # --------------------------------------------------
+        # MODO NORMAL (preview único)
+        # --------------------------------------------------
         if not st.session_state.pdl_fullscreen:
+            footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)
+            html_current = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)
+
             st.components.v1.html(
                 html_current,
                 height=1200,
@@ -1765,40 +1834,50 @@ def main():
             )
             return
 
-        # ---------- MODO FULLSCREEN SLIDES (ATUAL + PRÓXIMA) ----------
-        def _title_from_item(it):
-            if isinstance(it, dict):
-                s = (it.get("title") or it.get("song") or "").strip()
-                a = (it.get("artist") or "").strip()
-                t = f"{s} - {a}".strip(" -")
-                return t if t else "Cifra"
-            return "Cifra"
+        # --------------------------------------------------
+        # MODO FULLSCREEN (slides) — ✅ TODAS as páginas da setlist
+        # --------------------------------------------------
 
-        slides = [html_current]
-        titles = [_title_from_item(current_item)]
+        # 1) achata todos os itens em ordem
+        flat = []
+        for b_idx, block in enumerate(blocks):
+            items = block.get("items", [])
+            for i_idx, it in enumerate(items):
+                flat.append((b_idx, i_idx, block.get("name", f"Bloco {b_idx+1}"), it))
 
-        if footer_next_item is not None:
-            html_next = build_sheet_page_html(
-                footer_next_item,
-                footer_mode,
-                None,                 # não precisa "próximo do próximo" para o swipe básico
-                current_block_name,
-            )
-            slides.append(html_next)
-            titles.append(_title_from_item(footer_next_item))
+        if not flat:
+            st.info("Sem itens para exibir em fullscreen.")
+            return
 
-        # OBS: requer que você tenha colado a função fullscreen_slides_viewer
+        # 2) define o índice inicial (mesmo item que está no preview)
+        start_index = 0
+        if cur_block_idx is not None and cur_item_idx is not None:
+            for k, (b, i, _, _) in enumerate(flat):
+                if b == cur_block_idx and i == cur_item_idx:
+                    start_index = k
+                    break
+
+        # 3) monta slides e títulos
+        slides = []
+        titles = []
+
+        def _pretty_title(it: dict) -> str:
+            if it.get("type") == "pause":
+                return f"Pausa — {it.get('label','Pausa')}"
+            s = (it.get("title") or "Música").strip()
+            a = (it.get("artist") or "").strip()
+            return f"{s} - {a}".strip(" -")
+
+        for k, (b_idx, i_idx, blk_name, it) in enumerate(flat):
+            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+            html = build_sheet_page_html(it, footer_mode, footer_next_item, blk_name)
+            slides.append(html)
+            titles.append(_pretty_title(it))
+
+        # 4) renderiza o viewer
         fullscreen_slides_viewer(
             slides=slides,
             titles=titles,
-            start_index=0,
+            start_index=start_index,
             height=900
         )
-
-
-# ==============================================================
-# EXECUÇÃO
-# ==============================================================
-
-if __name__ == "__main__":
-    main()

@@ -1462,7 +1462,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   /* Aqui a "folha" fica branca como PDF */
   .paper {{
-    max-width: 1040px;
+    max-width: 100%;
     margin: 0 auto;
     background: #fff;
     color: #111;

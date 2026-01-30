@@ -1642,70 +1642,75 @@ html, body {
 </style>
 """
 
-  .strip {
-    display:flex;
-    height:100%;
-    width:100%;
-    transform: translateX(0);
-    transition: transform 220ms ease-out;
-  }
+  <style>
 
-  .slide {
-    flex: 0 0 100%;
-    height:100%;
-    overflow:auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 14px;
-    box-sizing:border-box;
-  }
-
-  /* Aqui a "folha" fica branca como PDF */
-  .paper {
-    max-width: 100%;
-    margin: 0 auto;
-    background: #fff;
-    color: #111;
-    border-radius: 0px;
-    padding: 0;
-    box-sizing:border-box;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-    overflow: hidden;
-  }
-
-  /* Usa iframe pra isolar o CSS de cada página e não quebrar teu layout */
-  .paper iframe {
-    width:100%;
-    border:0;
-    display:block;
-  }
-
-  .dots {
-    position:fixed;
-    bottom:10px;
-    left:50%;
-    transform:translateX(-50%);
-    display:flex;
-    gap:6px;
-    z-index: 10;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(0,0,0,0.62);
+.strip {
+  display:flex;
+  height:100%;
+  width:100%;
+  transform: translateX(0);
+  transition: transform 220ms ease-out;
 }
 
-  .dot {
-    width:7px; height:7px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.25);
-  }
+.slide {
+  flex: 0 0 100%;
+  height:100%;
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px;
+  box-sizing:border-box;
+}
 
-  .dot.active {
-    background: rgba(255,255,255,0.90);
-  }
+/* Aqui a "folha" fica branca como PDF */
+.paper {
+  max-width: 100%;
+  margin: 0 auto;
+  background: #fff;
+  color: #111;
+  border-radius: 0px;
+  padding: 0;
+  box-sizing:border-box;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
 
-  /* Em fullscreen, tenta reduzir o header pra ganhar espaço */
-  :fullscreen .topbar {
-    background: rgba(0,0,0,0.40);
-  }
+/* Usa iframe pra isolar o CSS de cada página */
+.paper iframe {
+  width:100%;
+  border:0;
+  display:block;
+}
+
+.dots {
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:6px;
+  z-index:10;
+  padding:6px 10px;
+  border-radius:999px;
+  background: rgba(0,0,0,0.62);
+}
+
+.dot {
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background: rgba(255,255,255,0.25);
+}
+
+.dot.active {
+  background: rgba(255,255,255,0.90);
+}
+
+/* Em fullscreen reduz header */
+:fullscreen .topbar {
+  background: rgba(0,0,0,0.40);
+}
+
+</style>
 </style>
 </head>
 <body>

@@ -1429,10 +1429,12 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
     payload_json = json.dumps(payload)
 
-    start_index = int(start_index) if isinstance(start_index, (int, float, str)) else 0
-    if start_index < 0:
+    try:
+        start_index = int(start_index)
+    except Exception:
         start_index = 0
-    if start_index >= len(slides):
+
+    if start_index < 0 or start_index >= len(slides):
         start_index = 0
 
     html = f"""
@@ -1443,9 +1445,13 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   html, body {{
-    margin:0; padding:0; height:100%; width:100%;
-    background:#000; overflow:hidden;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Courier New, sans-serif;
+    margin:0;
+    padding:0;
+    height:100%;
+    width:100%;
+    background:#000;
+    overflow:hidden;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, "Courier New", sans-serif;
   }}
 
   /* Container ocupa tudo (tenta "parecer F11") */
@@ -1456,261 +1462,136 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     overflow:hidden;
   }}
 
-  html = f"""
-<style>
-.topbar {{
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
+  /* =========================
+     SUA TOPBAR (mantendo valores)
+     ========================= */
+  .topbar {{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
 
-    height: clamp(3px, 4vh, 54px);
+    height: clamp(3px, 2vh, 54px);
 
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
 
     padding: 0 clamp(6px, 2vw, 16px);
 
-    background: rgba(0,0,0,0.62);
-    z-index: 10;
-    box-sizing: border-box;
+    background:rgba(0,0,0,0.62);
+    z-index:10;
+    box-sizing:border-box;
     backdrop-filter: blur(3px);
-}}
-</style>
-"""
+  }}
 
-  html = """
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  .title {{
+    color:#fff;
+    font-size: clamp(6px, 2vw, 16px);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:62vw;
+    opacity:0.95;
+  }}
 
-<style>
-html, body {
-  margin:0;
-  padding:0;
-  height:100%;
-  width:100%;
-  background:#000;
-  overflow:hidden;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Courier New, sans-serif;
-}
+  .btn {{
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    color:#fff;
 
-/* Container ocupa tudo */
-.app {
-  position:fixed;
-  inset:0;
-  background:#000;
-  overflow:hidden;
-}
+    border-radius: clamp(0.5px, 0.5vw, 16px);
 
-/* =========================
-   SUA TOPBAR (INALTERADA)
-   ========================= */
-.topbar {
-  position:fixed;
-  top:0;
-  left:0;
-  right:0;
+    padding:
+      clamp(3.5px, 0.5vh, 8px)
+      clamp(4px, 0.75vw, 12px);
 
-  height: clamp(3px, 2vh, 54px);
+    font-size: clamp(2.5px, 2.5vw, 8px);
 
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
+    cursor:pointer;
+  }}
 
-  padding: 0 clamp(6px, 2vw, 16px);
+  /* =========================
+     SUA STAGE (ajuste: top segue a topbar)
+     ========================= */
+  .stage {{
+    position:fixed;
 
-  background:rgba(0,0,0,0.62);
-  z-index:10;
-  box-sizing:border-box;
-  backdrop-filter: blur(3px);
-}
+    /* em vez de 54px fixo, usa a mesma lógica da topbar */
+    top: clamp(3px, 2vh, 54px);
+    left:0;
+    right:0;
+    bottom:0;
 
-/* =========================
-   SEU TITLE (INALTERADO)
-   ========================= */
-.title {
-  color:#fff;
+    background:#050505;
+    overflow:hidden;
+    touch-action: pan-y; /* scroll vertical dentro do slide */
+  }}
 
-  font-size: clamp(6px, 2vw, 16px);
+  .strip {{
+    display:flex;
+    height:100%;
+    width:100%;
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }}
 
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  max-width:62vw;
-  opacity:0.95;
-}
+  .slide {{
+    flex: 0 0 100%;
+    height:100%;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px;
+    box-sizing:border-box;
+  }}
 
-/* =========================
-   SEUS BOTÕES (INALTERADOS)
-   ========================= */
-.btn {
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.18);
-  color:#fff;
+  /* A "folha" branca como PDF */
+  .paper {{
+    max-width: 100%;
+    margin: 0 auto;
+    background: #fff;
+    color: #111;
+    border-radius: 0px;
+    padding: 0;
+    box-sizing:border-box;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    overflow: hidden;
+  }}
 
-  border-radius: clamp(0.5px, 0.5vw, 16px);
+  /* iframe isola o CSS do HTML de cada página */
+  .paper iframe {{
+    width:100%;
+    border:0;
+    display:block;
+  }}
 
-  padding:
-    clamp(3.5px, 0.5vh, 8px)
-    clamp(4px, 0.75vw, 12px);
+  .dots {{
+    position:fixed;
+    bottom:10px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    gap:6px;
+    z-index:10;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.62);
+  }}
 
-  font-size: clamp(2.5px, 2.5vw, 8px);
+  .dot {{
+    width:7px;
+    height:7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+  }}
 
-  cursor:pointer;
-}
+  .dot.active {{
+    background: rgba(255,255,255,0.90);
+  }}
 
-/* =========================
-   SUA STAGE (INALTERADA)
-   ========================= */
-.stage {
-  position:fixed;
-
-  top: clamp(3px, 4vh, 16px);
-  left:0;
-  right:0;
-  bottom:0;
-
-  background:#050505;
-  overflow:hidden;
-  touch-action: pan-y;
-}
-
-/* =========================
-   RESTANTE NORMAL
-   ========================= */
-.strip {
-  display:flex;
-  height:100%;
-  width:100%;
-  transform: translateX(0);
-  transition: transform 220ms ease-out;
-}
-
-.slide {
-  flex: 0 0 100%;
-  height:100%;
-  overflow:auto;
-  -webkit-overflow-scrolling: touch;
-  padding:14px;
-  box-sizing:border-box;
-}
-
-.paper {
-  max-width: 1040px;
-  margin: 0 auto;
-  background:#fff;
-  color:#111;
-  border-radius:0;
-  padding:0;
-  box-sizing:border-box;
-  overflow:hidden;
-}
-
-.paper iframe {
-  width:100%;
-  border:0;
-  display:block;
-}
-
-.dots {
-  position:fixed;
-  bottom:10px;
-  left:50%;
-  transform:translateX(-50%);
-  display:flex;
-  gap:6px;
-  z-index:10;
-  padding:6px 10px;
-  border-radius:999px;
-  background: rgba(0,0,0,0.62);
-}
-
-.dot {
-  width:7px;
-  height:7px;
-  border-radius:50%;
-  background: rgba(255,255,255,0.25);
-}
-
-.dot.active {
-  background: rgba(255,255,255,0.90);
-}
-</style>
-"""
-
-  <style>
-
-.strip {
-  display:flex;
-  height:100%;
-  width:100%;
-  transform: translateX(0);
-  transition: transform 220ms ease-out;
-}
-
-.slide {
-  flex: 0 0 100%;
-  height:100%;
-  overflow:auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 14px;
-  box-sizing:border-box;
-}
-
-/* Aqui a "folha" fica branca como PDF */
-.paper {
-  max-width: 100%;
-  margin: 0 auto;
-  background: #fff;
-  color: #111;
-  border-radius: 0px;
-  padding: 0;
-  box-sizing:border-box;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-  overflow: hidden;
-}
-
-/* Usa iframe pra isolar o CSS de cada página */
-.paper iframe {
-  width:100%;
-  border:0;
-  display:block;
-}
-
-.dots {
-  position:fixed;
-  bottom:10px;
-  left:50%;
-  transform:translateX(-50%);
-  display:flex;
-  gap:6px;
-  z-index:10;
-  padding:6px 10px;
-  border-radius:999px;
-  background: rgba(0,0,0,0.62);
-}
-
-.dot {
-  width:7px;
-  height:7px;
-  border-radius:50%;
-  background: rgba(255,255,255,0.25);
-}
-
-.dot.active {
-  background: rgba(255,255,255,0.90);
-}
-
-/* Em fullscreen reduz header */
-:fullscreen .topbar {
-  background: rgba(0,0,0,0.40);
-}
-
-</style>
+  :fullscreen .topbar {{
+    background: rgba(0,0,0,0.40);
+  }}
 </style>
 </head>
 <body>
@@ -1738,7 +1619,7 @@ html, body {
 
 <script>
   const items = {payload_json};
-  let idx = {int(start_index)};
+  let idx = {start_index};
 
   const strip = document.getElementById("strip");
   const title = document.getElementById("title");
@@ -1746,11 +1627,16 @@ html, body {
   const stage = document.getElementById("stage");
   const appRoot = document.getElementById("appRoot");
 
+  function topbarPx() {{
+    // Lê a altura real da topbar (com clamp aplicado)
+    const tb = document.querySelector(".topbar");
+    return tb ? tb.getBoundingClientRect().height : 54;
+  }}
+
   function tryEnterFullscreen() {{
     try {{
-      const el = appRoot;
       if (document.fullscreenElement) return;
-      if (el.requestFullscreen) el.requestFullscreen();
+      if (appRoot.requestFullscreen) appRoot.requestFullscreen();
     }} catch (e) {{}}
   }}
 
@@ -1773,16 +1659,13 @@ html, body {
       const p = document.createElement("div");
       p.className = "paper";
 
-      // iframe isola CSS do HTML de cada página (evita bagunçar layout)
       const fr = document.createElement("iframe");
-      fr.setAttribute("sandbox", "allow-same-origin"); // suficiente p/ srcdoc
+      fr.setAttribute("sandbox", "allow-same-origin");
       fr.srcdoc = it.html;
 
-      // Ajusta altura do iframe pra ocupar a tela (sem cortar)
       fr.onload = () => {{
         try {{
-          // altura mínima: stage height - padding
-          const h = Math.max(window.innerHeight - 54 - 40, 600);
+          const h = Math.max(window.innerHeight - topbarPx() - 28, 420);
           fr.style.height = h + "px";
         }} catch (e) {{}}
       }};
@@ -1799,11 +1682,11 @@ html, body {
   }}
 
   function updateUI() {{
+    if (!items.length) return;
     title.textContent = `${{idx+1}}/${{items.length}} • ${{items[idx].title}}`;
     [...dots.children].forEach((d, i) => d.classList.toggle("active", i === idx));
     strip.style.transform = `translateX(${{-idx * 100}}%)`;
 
-    // sobe pro topo do slide atual
     const currentSlide = strip.children[idx];
     if (currentSlide) currentSlide.scrollTo(0, 0);
   }}
@@ -1818,20 +1701,16 @@ html, body {
   document.getElementById("nextBtn").onclick = next;
   document.getElementById("prevBtn").onclick = prev;
 
-  // Fullscreen real (parecido com F11)
   document.getElementById("fsBtn").onclick = () => {{
     tryEnterFullscreen();
   }};
 
-  // "Sair" tenta sair do fullscreen e sugere voltar no app
   document.getElementById("exitBtn").onclick = () => {{
     exitFullscreen();
-    // Não dá pra "fechar" componente Streamlit via JS puro.
-    // O app precisa ter um botão Python "Voltar" que desative o modo fullscreen.
     title.textContent = "Saindo… use o botão 'Voltar' do app";
   }};
 
-  // Swipe horizontal (sem atrapalhar scroll vertical)
+  // Swipe horizontal
   let x0=null, y0=null, t0=null;
   stage.addEventListener("touchstart", (e) => {{
     const t = e.touches[0];
@@ -1857,25 +1736,28 @@ html, body {
     if (e.key === "Escape") exitFullscreen();
   }});
 
-  // Recalcula altura quando gira a tela
-  window.addEventListener("resize", () => {{
+  // Recalcula altura quando redimensiona / gira
+  function resizeIframes() {{
     const iframes = strip.querySelectorAll("iframe");
-    iframes.forEach(fr => {{
-      const h = Math.max(window.innerHeight - 54 - 40, 600);
-      fr.style.height = h + "px";
-    }});
-  }});
+    const h = Math.max(window.innerHeight - topbarPx() - 28, 420);
+    iframes.forEach(fr => fr.style.height = h + "px");
+  }}
+  window.addEventListener("resize", () => {{
+    resizeIframes();
+  }}, {{passive:true}});
 
   buildSlides();
   goTo(idx);
 
-  // Importante: fullscreen só funciona com "gesto do usuário".
-  // Então a gente NÃO força automaticamente.
+  // Observação: fullscreen só funciona com gesto do usuário -> não forçamos automaticamente.
 </script>
 </body>
 </html>
 """
     components.html(html, height=height, scrolling=False)
+ 
+ 
+
 
 # ==============================================================
 # 14) HOME

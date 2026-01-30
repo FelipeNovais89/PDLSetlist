@@ -1480,33 +1480,167 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 </style>
 """
 
-  .title {{
-    color:#fff;
-    font-size: clamp(6px, 2vw, 16px);
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    max-width:62vw;
-    opacity:0.95;
-  }}
+  html = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  .btn {{
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.18);
-    color:#fff;
-    border-radius: clamp(0.5px, 0.5vw, 16px);
-    padding: clamp(3.5px, 0.5vh, 8px) clamp(4px, 0.75vw, 12px);
-    font-size: clamp(2.5px, 2.5vw, 8px);
-    cursor:pointer;
-  }}
+<style>
+html, body {
+  margin:0;
+  padding:0;
+  height:100%;
+  width:100%;
+  background:#000;
+  overflow:hidden;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Courier New, sans-serif;
+}
 
-  .stage {{
-    position:fixed;
-    top: clamp(3px, 4vh, 16px); left:0; right:0; bottom:0;
-    background:#050505;
-    overflow:hidden;
-    touch-action: pan-y; /* permite scroll vertical dentro do slide */
-  }}
+/* Container ocupa tudo */
+.app {
+  position:fixed;
+  inset:0;
+  background:#000;
+  overflow:hidden;
+}
+
+/* =========================
+   SUA TOPBAR (INALTERADA)
+   ========================= */
+.topbar {
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+
+  height: clamp(3px, 2vh, 54px);
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding: 0 clamp(6px, 2vw, 16px);
+
+  background:rgba(0,0,0,0.62);
+  z-index:10;
+  box-sizing:border-box;
+  backdrop-filter: blur(3px);
+}
+
+/* =========================
+   SEU TITLE (INALTERADO)
+   ========================= */
+.title {
+  color:#fff;
+
+  font-size: clamp(6px, 2vw, 16px);
+
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:62vw;
+  opacity:0.95;
+}
+
+/* =========================
+   SEUS BOTÕES (INALTERADOS)
+   ========================= */
+.btn {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.18);
+  color:#fff;
+
+  border-radius: clamp(0.5px, 0.5vw, 16px);
+
+  padding:
+    clamp(3.5px, 0.5vh, 8px)
+    clamp(4px, 0.75vw, 12px);
+
+  font-size: clamp(2.5px, 2.5vw, 8px);
+
+  cursor:pointer;
+}
+
+/* =========================
+   SUA STAGE (INALTERADA)
+   ========================= */
+.stage {
+  position:fixed;
+
+  top: clamp(3px, 4vh, 16px);
+  left:0;
+  right:0;
+  bottom:0;
+
+  background:#050505;
+  overflow:hidden;
+  touch-action: pan-y;
+}
+
+/* =========================
+   RESTANTE NORMAL
+   ========================= */
+.strip {
+  display:flex;
+  height:100%;
+  width:100%;
+  transform: translateX(0);
+  transition: transform 220ms ease-out;
+}
+
+.slide {
+  flex: 0 0 100%;
+  height:100%;
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+  padding:14px;
+  box-sizing:border-box;
+}
+
+.paper {
+  max-width: 1040px;
+  margin: 0 auto;
+  background:#fff;
+  color:#111;
+  border-radius:0;
+  padding:0;
+  box-sizing:border-box;
+  overflow:hidden;
+}
+
+.paper iframe {
+  width:100%;
+  border:0;
+  display:block;
+}
+
+.dots {
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:6px;
+  z-index:10;
+  padding:6px 10px;
+  border-radius:999px;
+  background: rgba(0,0,0,0.62);
+}
+
+.dot {
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background: rgba(255,255,255,0.25);
+}
+
+.dot.active {
+  background: rgba(255,255,255,0.90);
+}
+</style>
+"""
 
   .strip {{
     display:flex;

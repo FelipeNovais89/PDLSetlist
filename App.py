@@ -1153,158 +1153,146 @@ def render_song_database():
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
-
 import streamlit.components.v1 as components
+import json
 
 def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
-    """
-    Viewer em estilo SLIDES (um por tela) com swipe esquerda/direita.
-    - Usa Fullscreen API (requestFullscreen) -> parecido com F11.
-    - No mobile, não remove 100% a URL/UI do navegador (limitação do Chrome).
-    """
     if not slides:
         st.info("Sem itens para exibir em fullscreen.")
         return
 
     if titles is None:
         titles = [f"{i+1}" for i in range(len(slides))]
-
     if len(titles) != len(slides):
         titles = (titles + [f"{i+1}" for i in range(len(slides))])[: len(slides)]
 
+    try:
+        start_index = int(start_index)
+    except Exception:
+        start_index = 0
+    if start_index < 0 or start_index >= len(slides):
+        start_index = 0
+
     payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
-    payload_json = json.dumps(payload)
+    payload_json = json.dumps(payload, ensure_ascii=False)
 
-    start_index = int(start_index) if isinstance(start_index, (int, float, str)) else 0
-    if start_index < 0:
-        start_index = 0
-    if start_index >= len(slides):
-        start_index = 0
+    # Evita quebrar o HTML caso exista </script> dentro do conteúdo
+    payload_json_safe = payload_json.replace("</script>", "<\\/script>")
 
-    html = f"""
+    html = """
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  html, body {{
+  html, body {
     margin:0; padding:0; height:100%; width:100%;
     background:#000; overflow:hidden;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  }}
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, "Courier New", sans-serif;
+  }
 
-  /* Container ocupa tudo (tenta "parecer F11") */
-  .app {{
-    position:fixed;
-    inset:0;
-    background:#000;
-    overflow:hidden;
-  }}
+  .app { position:fixed; inset:0; background:#000; overflow:hidden; }
 
-  .topbar {{
+  /* TOPBAR (mantendo seus valores visíveis) */
+  .topbar {
     position:fixed; top:0; left:0; right:0;
-    height:54px;
+    height: 2vh;   /* <<== agora com ; */
+    min-height: 36px;
+    max-height: 54px;
+
     display:flex; align-items:center; justify-content:space-between;
-    padding:0 12px;
+    padding: 0 clamp(6px, 2vw, 16px);
+
     background:rgba(0,0,0,0.62);
     z-index:10;
     box-sizing:border-box;
-    backdrop-filter: blur(6px);
-  }}
+    backdrop-filter: blur(3px);
+  }
 
-  .title {{
+  .title {
     color:#fff;
-    font-size:14px;
+    font-size: clamp(6px, 2vw, 16px);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
     max-width:62vw;
     opacity:0.95;
-  }}
+  }
 
-  .btn {{
+  .btn {
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.18);
     color:#fff;
-    border-radius:10px;
-    padding:8px 10px;
-    font-size:14px;
+    border-radius: clamp(0.5px, 0.5vw, 16px);
+    padding: clamp(3.5px, 0.5vh, 8px) clamp(4px, 0.75vw, 12px);
+    font-size: clamp(2.5px, 2.5vw, 8px);
     cursor:pointer;
-  }}
+  }
 
-  .stage {{
+  .stage {
     position:fixed;
-    top:54px; left:0; right:0; bottom:0;
+    top: clamp(3px, 2vh, 54px);
+    left:0; right:0; bottom:0;
     background:#050505;
     overflow:hidden;
-    touch-action: pan-y; /* permite scroll vertical dentro do slide */
-  }}
+    touch-action: pan-y;
+  }
 
-  .strip {{
+  .strip {
     display:flex;
     height:100%;
     width:100%;
     transform: translateX(0);
     transition: transform 220ms ease-out;
-  }}
+  }
 
-  .slide {{
+  .slide {
     flex: 0 0 100%;
     height:100%;
     overflow:auto;
     -webkit-overflow-scrolling: touch;
     padding: 14px;
     box-sizing:border-box;
-  }}
+  }
 
-  /* Aqui a "folha" fica branca como PDF */
-  .paper {{
-    max-width: 1040px;
+  .paper {
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
     background: #fff;
     color: #111;
-    border-radius: 12px;
+    border-radius: 0px;
     padding: 0;
     box-sizing:border-box;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);
     overflow: hidden;
-  }}
+  }
 
-  /* Usa iframe pra isolar o CSS de cada página e não quebrar teu layout */
-  .paper iframe {{
+  /* iframe sempre ocupa o slide inteiro disponível */
+  .paper iframe{
     width:100%;
+    height: calc(100vh - clamp(3px, 2vh, 54px) - 28px);
     border:0;
     display:block;
-  }}
+    background:#fff;
+  }
 
-  .dots {{
+  .dots {
     position:fixed;
     bottom:10px;
     left:50%;
     transform:translateX(-50%);
     display:flex;
     gap:6px;
-    z-index: 10;
+    z-index:10;
     padding: 6px 10px;
     border-radius: 999px;
     background: rgba(0,0,0,0.62);
-  }}
+  }
 
-  .dot {{
-    width:7px; height:7px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.25);
-  }}
-
-  .dot.active {{
-    background: rgba(255,255,255,0.90);
-  }}
-
-  /* Em fullscreen, tenta reduzir o header pra ganhar espaço */
-  :fullscreen .topbar {{
-    background: rgba(0,0,0,0.40);
-  }}
+  .dot { width:7px; height:7px; border-radius:50%; background: rgba(255,255,255,0.25); }
+  .dot.active { background: rgba(255,255,255,0.90); }
 </style>
 </head>
 <body>
@@ -1330,56 +1318,42 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     <div class="dots" id="dots"></div>
   </div>
 
+  <script id="payload" type="application/json">__PAYLOAD_JSON__</script>
+
 <script>
-  const items = {payload_json};
-  let idx = {int(start_index)};
+  let items = [];
+  try {
+    items = JSON.parse(document.getElementById("payload").textContent || "[]");
+  } catch(e) {
+    items = [];
+  }
+
+  let idx = __START_INDEX__;
 
   const strip = document.getElementById("strip");
   const title = document.getElementById("title");
-  const dots = document.getElementById("dots");
+  const dots  = document.getElementById("dots");
   const stage = document.getElementById("stage");
   const appRoot = document.getElementById("appRoot");
 
-  function tryEnterFullscreen() {{
-    try {{
-      const el = appRoot;
-      if (document.fullscreenElement) return;
-      if (el.requestFullscreen) el.requestFullscreen();
-    }} catch (e) {{}}
-  }}
-
-  function exitFullscreen() {{
-    try {{
-      if (document.fullscreenElement && document.exitFullscreen) {{
-        document.exitFullscreen();
-      }}
-    }} catch (e) {{}}
-  }}
-
-  function buildSlides() {{
+  function buildSlides() {
     strip.innerHTML = "";
     dots.innerHTML = "";
 
-    items.forEach((it, i) => {{
+    if (!items.length) {
+      title.textContent = "ERRO: items vazio (payload não carregou)";
+      return;
+    }
+
+    items.forEach((it, i) => {
       const s = document.createElement("div");
       s.className = "slide";
 
       const p = document.createElement("div");
       p.className = "paper";
 
-      // iframe isola CSS do HTML de cada página (evita bagunçar layout)
       const fr = document.createElement("iframe");
-      fr.setAttribute("sandbox", "allow-same-origin"); // suficiente p/ srcdoc
-      fr.srcdoc = it.html;
-
-      // Ajusta altura do iframe pra ocupar a tela (sem cortar)
-      fr.onload = () => {{
-        try {{
-          // altura mínima: stage height - padding
-          const h = Math.max(window.innerHeight - 54 - 40, 600);
-          fr.style.height = h + "px";
-        }} catch (e) {{}}
-      }};
+      fr.srcdoc = it.html;   // <- aqui é o mais confiável
 
       p.appendChild(fr);
       s.appendChild(p);
@@ -1389,86 +1363,67 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
       d.className = "dot";
       d.onclick = () => goTo(i);
       dots.appendChild(d);
-    }});
-  }}
+    });
+  }
 
-  function updateUI() {{
-    title.textContent = `${{idx+1}}/${{items.length}} • ${{items[idx].title}}`;
+  function updateUI() {
+    if (!items.length) return;
+    const t = items[idx]?.title || "Cifra";
+    title.textContent = (idx+1) + "/" + items.length + " • " + t + "   (items: " + items.length + ")";
     [...dots.children].forEach((d, i) => d.classList.toggle("active", i === idx));
-    strip.style.transform = `translateX(${{-idx * 100}}%)`;
-
-    // sobe pro topo do slide atual
+    strip.style.transform = "translateX(" + (-idx * 100) + "%)";
     const currentSlide = strip.children[idx];
     if (currentSlide) currentSlide.scrollTo(0, 0);
-  }}
+  }
 
-  function goTo(i) {{
-    idx = (i + items.length) % items.length;
-    updateUI();
-  }}
-  function next() {{ goTo(idx + 1); }}
-  function prev() {{ goTo(idx - 1); }}
+  function goTo(i) { idx = (i + items.length) % items.length; updateUI(); }
+  function next() { goTo(idx + 1); }
+  function prev() { goTo(idx - 1); }
 
   document.getElementById("nextBtn").onclick = next;
   document.getElementById("prevBtn").onclick = prev;
 
-  // Fullscreen real (parecido com F11)
-  document.getElementById("fsBtn").onclick = () => {{
-    tryEnterFullscreen();
-  }};
+  document.getElementById("fsBtn").onclick = () => {
+    try {
+      if (!document.fullscreenElement && appRoot.requestFullscreen) appRoot.requestFullscreen();
+    } catch(e) {}
+  };
 
-  // "Sair" tenta sair do fullscreen e sugere voltar no app
-  document.getElementById("exitBtn").onclick = () => {{
-    exitFullscreen();
-    // Não dá pra "fechar" componente Streamlit via JS puro.
-    // O app precisa ter um botão Python "Voltar" que desative o modo fullscreen.
-    title.textContent = "Saindo… use o botão 'Voltar' do app";
-  }};
+  document.getElementById("exitBtn").onclick = () => {
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch(e) {}
+    title.textContent = "Use 'Voltar' no app";
+  };
 
-  // Swipe horizontal (sem atrapalhar scroll vertical)
+  // Swipe
   let x0=null, y0=null, t0=null;
-  stage.addEventListener("touchstart", (e) => {{
+  stage.addEventListener("touchstart", (e) => {
     const t = e.touches[0];
     x0=t.clientX; y0=t.clientY; t0=Date.now();
-  }}, {{passive:true}});
+  }, {passive:true});
 
-  stage.addEventListener("touchend", (e) => {{
+  stage.addEventListener("touchend", (e) => {
     if (x0===null) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - x0;
     const dy = t.clientY - y0;
     const dt = Date.now() - t0;
 
-    if (Math.abs(dx) > 70 && Math.abs(dy) < 70 && dt < 800) {{
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 70 && dt < 800) {
       if (dx < 0) next(); else prev();
-    }}
+    }
     x0=null; y0=null; t0=null;
-  }}, {{passive:true}});
-
-  document.addEventListener("keydown", (e) => {{
-    if (e.key === "ArrowRight") next();
-    if (e.key === "ArrowLeft") prev();
-    if (e.key === "Escape") exitFullscreen();
-  }});
-
-  // Recalcula altura quando gira a tela
-  window.addEventListener("resize", () => {{
-    const iframes = strip.querySelectorAll("iframe");
-    iframes.forEach(fr => {{
-      const h = Math.max(window.innerHeight - 54 - 40, 600);
-      fr.style.height = h + "px";
-    }});
-  }});
+  }, {passive:true});
 
   buildSlides();
   goTo(idx);
-
-  // Importante: fullscreen só funciona com "gesto do usuário".
-  // Então a gente NÃO força automaticamente.
 </script>
 </body>
 </html>
 """
+
+    html = html.replace("__PAYLOAD_JSON__", payload_json_safe)
+    html = html.replace("__START_INDEX__", str(start_index))
+
     components.html(html, height=height, scrolling=False)
 
 # ==============================================================

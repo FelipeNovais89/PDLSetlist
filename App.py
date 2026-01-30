@@ -1156,20 +1156,22 @@ def render_song_database():
 # 13) PREVIEW (HTML simples) — ✅ com OBS/PREPARAÇÃO
 # ==============================================================
 
+# ==============================================================
+# 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
+# ==============================================================
+
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
     if cur_block_idx is None or cur_item_idx is None:
         return "none", None
 
-    # tenta achar o próximo item (na ordem)
     b = cur_block_idx
     i = cur_item_idx + 1
 
     while b < len(blocks):
         items = blocks[b].get("items", [])
         if i < len(items):
-            nxt = items[i]
-            return "next", nxt
+            return "next", items[i]
         b += 1
         i = 0
 
@@ -1177,41 +1179,38 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-    title = (item.get("title", "") if item.get("type") == "music" else item.get("label", "Pausa")) or ""
-    artist = item.get("artist", "") if item.get("type") == "music" else ""
-    bpm = item.get("bpm", "") if item.get("type") == "music" else ""
-    tom = item.get("tom", "") if item.get("type") == "music" else ""
 
-    # ✅ OBS / PREPARAÇÃO do item atual
-    obs = (item.get("obs", "") if item.get("type") == "music" else "") or ""
-    prep = (item.get("preparacao", "") if item.get("type") == "music" else "") or ""
+    title = item.get("title", "")
+    artist = item.get("artist", "")
+    bpm = item.get("bpm", "")
+    tom = item.get("tom", "")
 
-    # cifra
+    obs = item.get("obs", "") or ""
+    prep = item.get("preparacao", "") or ""
+
+    # ========= cifra =========
     cifra_txt = ""
-    if item.get("type") == "music":
-        use_s = item.get("use_simplificada", False)
-        cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
-        cid = str(cid).strip()
-        if cid:
-            cifra_txt = load_chord_from_drive(cid)
-        else:
-            cifra_txt = item.get("text", "")
+    use_s = item.get("use_simplificada", False)
+    cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
+
+    if cid:
+        cifra_txt = load_chord_from_drive(cid)
+    else:
+        cifra_txt = item.get("text", "")
+
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
-    # ✅ próxima música (com tom/bpm/artist)
+    # ========= próxima =========
     next_title = ""
     next_artist = ""
     next_tom = ""
     next_bpm = ""
 
     if footer_mode == "next" and footer_next_item:
-        if footer_next_item.get("type") == "music":
-            next_title = footer_next_item.get("title", "") or ""
-            next_artist = footer_next_item.get("artist", "") or ""
-            next_tom = footer_next_item.get("tom", "") or footer_next_item.get("tom_original", "") or ""
-            next_bpm = footer_next_item.get("bpm", "") or ""
-        else:
-            next_title = footer_next_item.get("label", "Pausa") or ""
+        next_title = footer_next_item.get("title", "")
+        next_artist = footer_next_item.get("artist", "")
+        next_tom = footer_next_item.get("tom", "")
+        next_bpm = footer_next_item.get("bpm", "")
 
     def esc(s: str) -> str:
         return (
@@ -1221,192 +1220,166 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             .replace(">", "&gt;")
         )
 
+    # ==========================================================
+    # ⚠️ TUDO DENTRO DE UMA ÚNICA f""" """  (MUUUUITO IMPORTANTE)
+    # ==========================================================
+
     html = f"""
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8"/>
+
 <style>
-    body {{
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        background: white;
-        color: #111;
-    }}
-    .sheet {{
-        width: 100%;
-        max-width: 980px;
-        margin: 0 auto;
-        padding: 14px 14px 24px 14px;
-    }}
 
-    .top {{
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 10px;
-        align-items: start;
-        border-bottom: 1px solid #ddd;
-        padding-bottom: 8px;
-        margin-bottom: 8px;
-    }}
-    .title {{
-        font-size: 18px;
-        font-weight: 800;
-        margin: 0;
-        line-height: 1.1;
-    }}
-    .artist {{
-        font-size: 12px;
-        margin-top: 3px;
-        color: #444;
-    }}
-    .kv {{
-        text-align: right;
-        font-size: 12px;
-        color: #222;
-        min-width: 70px;
-    }}
-    .kv b {{
-        display:block;
-        font-size: 11px;
-        margin-bottom: 2px;
-        color: #333;
-    }}
+body {{
+    font-family: Arial, sans-serif;
+    margin:0;
+    background:white;
+    color:#111;
+}}
 
-    .section-title {{
-        font-size: 12px;
-        font-weight: 800;
-        margin: 10px 0 6px 0;
-    }}
-    .box {{
-        border-top: 1px solid #ddd;
-        border-bottom: 1px solid #ddd;
-        padding: 8px 0;
-        font-size: 12px;
-        color: #222;
-        white-space: pre-wrap;
-        min-height: 22px;
-    }}
+.sheet {{
+    width:100%;
+    max-width:1000px;
+    margin:auto;
+    padding:14px;
+}}
 
-    /* IMPORTANTE: pra medir largura real e "forçar caber", NÃO pode quebrar linha */
-    .cifra {{
-        margin-top: 10px;
-        font-family: "Courier New", monospace;
-        font-size: 12px;
-        line-height: 1.25;
-        white-space: pre;           /* <- não quebra linha */
-        overflow-x: hidden;         /* <- evita barra horizontal */
-        border: 1px solid #eee;
-        padding: 10px;
-        border-radius: 10px;
-        min-height: 420px;
-    }}
+.top {{
+    display:grid;
+    grid-template-columns: 1fr auto auto;
+    gap:10px;
+    border-bottom:1px solid #ddd;
+    padding-bottom:8px;
+}}
 
-    .next {{
-        margin-top: 12px;
-        border-top: 1px solid #ddd;
-        padding-top: 10px;
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 10px;
-        align-items: start;
-    }}
-    .next .title {{
-        font-size: 14px;
-        font-weight: 800;
-    }}
+.title {{
+    font-size: clamp(14px, 2.2vw, 22px);
+    font-weight:800;
+}}
+
+.artist {{
+    font-size: clamp(11px, 1.8vw, 14px);
+    color:#555;
+}}
+
+.kv {{
+    text-align:right;
+    font-size: clamp(10px, 1.6vw, 13px);
+}}
+
+.section-title {{
+    margin-top:10px;
+    font-weight:800;
+    font-size:12px;
+}}
+
+.box {{
+    border-top:1px solid #ddd;
+    border-bottom:1px solid #ddd;
+    padding:6px 0;
+    min-height:20px;
+    font-size:12px;
+    white-space:pre-wrap;
+}}
+
+.cifra {{
+    font-family: "Courier New", monospace;
+    white-space: pre;
+    overflow:hidden;
+    margin-top:10px;
+    padding:10px;
+    border:1px solid #eee;
+    border-radius:10px;
+
+    font-size:14px;
+    line-height:1.25;
+}}
+
+.next {{
+    margin-top:12px;
+    border-top:1px solid #ddd;
+    padding-top:10px;
+    display:grid;
+    grid-template-columns: 1fr auto auto;
+    gap:10px;
+}}
+
 </style>
 </head>
+
 <body>
-  <div class="sheet">
 
-    <div class="top">
-      <div>
-        <div class="title">{esc(title)}</div>
-        <div class="artist">{esc(artist)}</div>
-      </div>
+<div class="sheet">
 
-      <div class="kv"><b>TOM</b>{esc(tom) if tom else "-"}</div>
-      <div class="kv"><b>BPM</b>{esc(bpm) if bpm else "-"}</div>
+  <div class="top">
+    <div>
+      <div class="title">{esc(title)}</div>
+      <div class="artist">{esc(artist)}</div>
     </div>
 
-    <div class="section-title">OBS.:</div>
-    <div class="box">{esc(obs) if obs.strip() else ""}</div>
+    <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
+  </div>
 
-    <div class="cifra">{esc(cifra_show)}</div>
+  <div class="section-title">OBS.:</div>
+  <div class="box">{esc(obs)}</div>
 
-    <div class="section-title">PREPARAÇÃO:</div>
-    <div class="box">{esc(prep) if prep.strip() else ""}</div>
+  <div class="cifra">{esc(cifra_show)}</div>
 
-    <div class="next">
-      <div>
-        <div class="title">{esc(next_title) if next_title else ""}</div>
-        <div class="artist">{esc(next_artist) if next_artist else ""}</div>
-      </div>
-      <div class="kv"><b>TOM</b>{esc(next_tom) if next_tom else ("-" if next_title else "")}</div>
-      <div class="kv"><b>BPM</b>{esc(next_bpm) if next_bpm else ("-" if next_title else "")}</div>
+  <div class="section-title">PREPARAÇÃO:</div>
+  <div class="box">{esc(prep)}</div>
+
+  <div class="next">
+    <div>
+      <div class="title">{esc(next_title)}</div>
+      <div class="artist">{esc(next_artist)}</div>
     </div>
+    <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
+  </div>
 
-  </div> <!-- fecha .sheet -->
+</div>
+
+
+<!-- ========================================================= -->
+<!-- AUTO FIT DA CIFRA (REDUZ FONTE ATÉ CABER NA LARGURA) -->
+<!-- ========================================================= -->
 
 <script>
 (function() {{
   const box = document.querySelector('.cifra');
   if (!box) return;
 
-  // ===== Config (mantive a lógica; ajuste como quiser) =====
-  const MAX_PX = 14;
-  const MIN_PX = 8;
-  const STEP   = 0.5;
-  const PAD_SAFETY = 2;
-  // =========================================================
+  const MAX = 14;
+  const MIN = 8;
+  const STEP = 0.5;
 
   function fits() {{
-    return (box.scrollWidth <= (box.clientWidth - PAD_SAFETY));
-  }}
-
-  function apply(px) {{
-    box.style.fontSize = px + 'px';
-  }}
-
-  function fitOnce() {{
-    let px = MAX_PX;
-    apply(px);
-
-    if (fits()) return;
-
-    while (px > MIN_PX && !fits()) {{
-      px -= STEP;
-      apply(px);
-    }}
+    return box.scrollWidth <= box.clientWidth;
   }}
 
   function fit() {{
-    requestAnimationFrame(() => {{
-      requestAnimationFrame(() => {{
-        fitOnce();
-      }});
-    }});
+    let px = MAX;
+    box.style.fontSize = px + 'px';
+
+    while(px > MIN && !fits()) {{
+        px -= STEP;
+        box.style.fontSize = px + 'px';
+    }}
   }}
 
-  let t = null;
-  function debounceFit() {{
-    clearTimeout(t);
-    t = setTimeout(fit, 80);
-  }}
-
-  window.addEventListener('resize', debounceFit, {{ passive: true }});
-  window.addEventListener('orientationchange', debounceFit, {{ passive: true }});
-
-  fit();
-}})();
+  window.addEventListener('load', fit);
+  window.addEventListener('resize', fit);
+})();
 </script>
 
 </body>
 </html>
 """
-return html
+
+    return html
 
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe

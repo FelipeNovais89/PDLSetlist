@@ -1471,7 +1471,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     left:0;
     right:0;
 
-    height: clamp(3px, 2vh, 54px);
+    height: 2vh
 
     display:flex;
     align-items:center;

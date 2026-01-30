@@ -1787,6 +1787,7 @@ def main():
         cur_block_idx = None
         cur_item_idx = None
 
+        # PRIORIDADE 1 — ITEM SELECIONADO NO EDITOR
         sel_b = st.session_state.selected_block_idx
         sel_i = st.session_state.selected_item_idx
 
@@ -1797,6 +1798,7 @@ def main():
                 cur_block_idx = sel_b
                 cur_item_idx = sel_i
 
+        # PRIORIDADE 2 — ITEM MARCADO COM 👁 (current_item)
         if current_item is None:
             cur = st.session_state.current_item
             if cur is not None:
@@ -1807,11 +1809,12 @@ def main():
                     cur_block_idx = b_idx
                     cur_item_idx = i_idx
 
+        # PRIORIDADE 3 — PRIMEIRO ITEM DO SETLIST
         if current_item is None:
             for b_idx, block in enumerate(blocks):
-                if block["items"]:
+                if block.get("items"):
                     current_item = block["items"][0]
-                    current_block_name = block["name"]
+                    current_block_name = block.get("name", f"Bloco {b_idx+1}")
                     cur_block_idx = b_idx
                     cur_item_idx = 0
                     break
@@ -1834,6 +1837,63 @@ def main():
             )
             return
 
+        # --------------------------------------------------
+        # MODO FULLSCREEN (slides) — ✅ TODAS as páginas da setlist
+        # --------------------------------------------------
+
+        # 1) “achata” todos os itens em ordem (bloco por bloco)
+        flat = []
+        for b_idx, block in enumerate(blocks):
+            items = block.get("items", [])
+            for i_idx, it in enumerate(items):
+                flat.append((b_idx, i_idx, block.get("name", f"Bloco {b_idx+1}"), it))
+
+        if not flat:
+            st.info("Sem itens para exibir em fullscreen.")
+            return
+
+        # 2) define o índice inicial (mesmo item que está no preview)
+        start_index = 0
+        if cur_block_idx is not None and cur_item_idx is not None:
+            for k, (b, i, _, _) in enumerate(flat):
+                if b == cur_block_idx and i == cur_item_idx:
+                    start_index = k
+                    break
+
+        # 3) monta slides e títulos
+        slides = []
+        titles = []
+
+        def _pretty_title(it: dict) -> str:
+            if not isinstance(it, dict):
+                return "Cifra"
+            if it.get("type") == "pause":
+                return f"Pausa — {it.get('label','Pausa')}"
+            s = (it.get("title") or "Música").strip()
+            a = (it.get("artist") or "").strip()
+            return f"{s} - {a}".strip(" -")
+
+        for (b_idx, i_idx, blk_name, it) in flat:
+            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+            html = build_sheet_page_html(it, footer_mode, footer_next_item, blk_name)
+            slides.append(html)
+            titles.append(_pretty_title(it))
+
+        # 4) renderiza o viewer (com fullscreen via requestFullscreen dentro do HTML)
+        fullscreen_slides_viewer(
+            slides=slides,
+            titles=titles,
+            start_index=start_index,
+            height=900
+        )
+
+
+# ==============================================================
+# EXECUÇÃO
+# ==============================================================
+
+if __name__ == "__main__":
+    main()
         # --------------------------------------------------
         # MODO FULLSCREEN (slides) — ✅ TODAS as páginas da setlist
         # --------------------------------------------------

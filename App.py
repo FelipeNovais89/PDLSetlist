@@ -1408,7 +1408,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     position:fixed; top:0; left:0; right:0;
     height:clamp(12px, 2.5vh, 54px);
     display:flex; align-items:center; justify-content:space-between;
-    padding:0 12px;
+    padding: 0 clamp(6px, 2vw, 16px);
     background:rgba(0,0,0,0.62);
     z-index:10;
     box-sizing:border-box;
@@ -1429,9 +1429,9 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.18);
     color:#fff;
-    border-radius:10px;
-    padding:8px 10px;
-    font-size:14px;
+    border-radius: clamp(2px, 2vw, 16px);
+    padding: clamp(2.5px, 0.5vh, 8px) clamp(3.75px, 0.75vw, 12px);
+    font-size: clamp(2.5px, 1vw, 8px);
     cursor:pointer;
   }}
 

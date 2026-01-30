@@ -1153,7 +1153,7 @@ def render_song_database():
 
 
 # ==============================================================
-# 13) PREVIEW (HTML simples) — ✅ responsivo + header sem quebrar
+# 13) PREVIEW (HTML simples) — ✅ com OBS/PREPARAÇÃO
 # ==============================================================
 
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
@@ -1161,6 +1161,7 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     if cur_block_idx is None or cur_item_idx is None:
         return "none", None
 
+    # tenta achar o próximo item (na ordem)
     b = cur_block_idx
     i = cur_item_idx + 1
 
@@ -1181,6 +1182,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     bpm = item.get("bpm", "") if item.get("type") == "music" else ""
     tom = item.get("tom", "") if item.get("type") == "music" else ""
 
+    # ✅ OBS / PREPARAÇÃO do item atual
     obs = (item.get("obs", "") if item.get("type") == "music" else "") or ""
     prep = (item.get("preparacao", "") if item.get("type") == "music" else "") or ""
 
@@ -1196,11 +1198,12 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             cifra_txt = item.get("text", "")
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
-    # próxima música (info)
+    # ✅ próxima música (com tom/bpm/artist)
     next_title = ""
     next_artist = ""
     next_tom = ""
     next_bpm = ""
+
     if footer_mode == "next" and footer_next_item:
         if footer_next_item.get("type") == "music":
             next_title = footer_next_item.get("title", "") or ""
@@ -1223,34 +1226,19 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 <html>
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <style>
-    :root {{
-        --pad: clamp(10px, 2vw, 16px);
-        --h1: clamp(15px, 3.4vw, 20px);
-        --meta: clamp(11px, 2.6vw, 13px);
-        --mono: clamp(12px, 2.8vw, 14px);
-    }}
-
-    html, body {{
-        height: 100%;
+    body {{
+        font-family: Arial, sans-serif;
         margin: 0;
         padding: 0;
-        background: #fff;
+        background: white;
         color: #111;
     }}
-
-    /* ocupa a tela inteira do iframe */
     .sheet {{
-        height: 100vh;
         width: 100%;
-        max-width: 1100px;
+        max-width: 980px;
         margin: 0 auto;
-        padding: var(--pad);
-        box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+        padding: 14px 14px 24px 14px;
     }}
 
     .top {{
@@ -1260,86 +1248,71 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
         align-items: start;
         border-bottom: 1px solid #ddd;
         padding-bottom: 8px;
+        margin-bottom: 8px;
     }}
-
-    .title-wrap {{
-        min-width: 0; /* importante para ellipsis funcionar */
-    }}
-
     .title {{
-        font-size: var(--h1);
-        font-weight: 900;
-        line-height: 1.1;
+        font-size: 18px;
+        font-weight: 800;
         margin: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        line-height: 1.1;
     }}
-
     .artist {{
-        font-size: var(--meta);
-        color: #444;
+        font-size: 12px;
         margin-top: 3px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        color: #444;
     }}
-
     .kv {{
         text-align: right;
-        font-size: var(--meta);
+        font-size: 12px;
         color: #222;
-        min-width: 64px;
+        min-width: 70px;
     }}
     .kv b {{
         display:block;
-        font-size: var(--meta);
-        opacity: .8;
+        font-size: 11px;
         margin-bottom: 2px;
+        color: #333;
     }}
 
     .section-title {{
-        font-size: var(--meta);
-        font-weight: 900;
-        margin: 2px 0 0 0;
+        font-size: 12px;
+        font-weight: 800;
+        margin: 10px 0 6px 0;
     }}
-
     .box {{
         border-top: 1px solid #ddd;
         border-bottom: 1px solid #ddd;
         padding: 8px 0;
-        font-size: var(--meta);
+        font-size: 12px;
         color: #222;
         white-space: pre-wrap;
-        min-height: 18px;
+        min-height: 22px;
     }}
 
-    /* cifra ocupa o "miolo" e rola */
     .cifra {{
-        flex: 1;
-        overflow: auto;
+        margin-top: 10px;
         font-family: "Courier New", monospace;
-        font-size: var(--mono);
+        font-size: 12px;
         line-height: 1.25;
-        white-space: pre;
+        white-space: pre-wrap;
         border: 1px solid #eee;
         padding: 10px;
-        border-radius: 12px;
-        background: #fff;
-        -webkit-overflow-scrolling: touch;
+        border-radius: 10px;
+        min-height: 420px;
     }}
 
     .next {{
+        margin-top: 12px;
         border-top: 1px solid #ddd;
-        padding-top: 8px;
+        padding-top: 10px;
         display: grid;
         grid-template-columns: 1fr auto auto;
         gap: 10px;
         align-items: start;
     }}
     .next .title {{
-        font-size: clamp(13px, 3vw, 16px);
-        font-weight: 900;
+        font-size: 14px;
+        font-weight: 800;
     }}
 </style>
 </head>
@@ -1347,7 +1320,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   <div class="sheet">
 
     <div class="top">
-      <div class="title-wrap">
+      <div>
         <div class="title">{esc(title)}</div>
         <div class="artist">{esc(artist)}</div>
       </div>
@@ -1365,7 +1338,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     <div class="box">{esc(prep) if prep.strip() else ""}</div>
 
     <div class="next">
-      <div class="title-wrap">
+      <div>
         <div class="title">{esc(next_title) if next_title else ""}</div>
         <div class="artist">{esc(next_artist) if next_artist else ""}</div>
       </div>
@@ -1378,7 +1351,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 </html>
 """
     return html
-    
+
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE)
 # ==============================================================
@@ -1608,7 +1581,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 </html>
 """
     components.html(html, height=height, scrolling=False)
-    
+
 # ==============================================================
 # 14) HOME
 # ==============================================================
@@ -1643,8 +1616,10 @@ def render_home():
                 st.rerun()
         else:
             st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
+
+
 # ==============================================================
-# 15) MAIN  (SEÇÃO INTEIRA — COM FULLSCREEN SLIDES + CSS FULLSCREEN)
+# 15) MAIN  (SEÇÃO INTEIRA — CORRIGIDA COM FULLSCREEN SLIDES/SWIPE)
 # ==============================================================
 
 def main():
@@ -1751,11 +1726,11 @@ def main():
         # RENDERIZAÇÃO FINAL DO PREVIEW (COM FULLSCREEN SLIDES)
         # --------------------------------------------------
 
-        # estado do fullscreen
+        # estado do fullscreen (persistente)
         if "pdl_fullscreen" not in st.session_state:
             st.session_state.pdl_fullscreen = False
 
-        # botões
+        # botões de controle
         b1, b2 = st.columns([1, 1])
         with b1:
             if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True, key="btn_fs_on"):
@@ -1763,19 +1738,6 @@ def main():
         with b2:
             if st.button("⬅️ Voltar", use_container_width=True, key="btn_fs_off"):
                 st.session_state.pdl_fullscreen = False
-
-        # ✅ CSS: “fullscreen real” no Streamlit (remove header/padding) quando em fullscreen
-        if st.session_state.pdl_fullscreen:
-            st.markdown(
-                """
-                <style>
-                header[data-testid="stHeader"] { display: none; }
-                div[data-testid="stToolbar"] { display: none; }
-                .block-container { padding-top: 0.35rem; padding-left: 0.35rem; padding-right: 0.35rem; padding-bottom: 0.35rem; }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
 
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
@@ -1819,13 +1781,13 @@ def main():
             html_next = build_sheet_page_html(
                 footer_next_item,
                 footer_mode,
-                None,
+                None,                 # não precisa "próximo do próximo" para o swipe básico
                 current_block_name,
             )
             slides.append(html_next)
             titles.append(_title_from_item(footer_next_item))
 
-        # ⚠️ requer a função fullscreen_slides_viewer já colada no arquivo
+        # OBS: requer que você tenha colado a função fullscreen_slides_viewer
         fullscreen_slides_viewer(
             slides=slides,
             titles=titles,

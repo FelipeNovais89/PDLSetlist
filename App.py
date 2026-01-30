@@ -1383,6 +1383,8 @@ body {{
 # ==============================================================
 
 import streamlit.components.v1 as components
+import base64
+import json
 
 def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     """
@@ -1402,6 +1404,9 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
     payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
     payload_json = json.dumps(payload)
+
+    # ✅ BLINDAGEM: evita </script> quebrar o JS
+    payload_b64 = base64.b64encode(payload_json.encode("utf-8")).decode("ascii")
 
     try:
         start_index = int(start_index)
@@ -1428,7 +1433,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     font-family: system-ui, -apple-system, Segoe UI, Roboto, "Courier New", sans-serif;
   }}
 
-  /* Container ocupa tudo (tenta "parecer F11") */
   .app {{
     position:fixed;
     inset:0;
@@ -1436,16 +1440,13 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     overflow:hidden;
   }}
 
-  /* =========================
-     SUA TOPBAR (mantendo valores)
-     ========================= */
   .topbar {{
     position:fixed;
     top:0;
     left:0;
     right:0;
 
-    height: 2vh;
+    height: 2vh;   /* ✅ manteve seu valor + corrigiu ; */
 
     display:flex;
     align-items:center;
@@ -1473,33 +1474,23 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.18);
     color:#fff;
-
     border-radius: clamp(0.5px, 0.5vw, 16px);
-
     padding:
       clamp(3.5px, 0.5vh, 8px)
       clamp(4px, 0.75vw, 12px);
-
     font-size: clamp(2.5px, 2.5vw, 8px);
-
     cursor:pointer;
   }}
 
-  /* =========================
-     SUA STAGE (ajuste: top segue a topbar)
-     ========================= */
   .stage {{
     position:fixed;
-
-    /* em vez de 54px fixo, usa a mesma lógica da topbar */
     top: clamp(3px, 2vh, 54px);
     left:0;
     right:0;
     bottom:0;
-
     background:#050505;
     overflow:hidden;
-    touch-action: pan-y; /* scroll vertical dentro do slide */
+    touch-action: pan-y;
   }}
 
   .strip {{
@@ -1519,7 +1510,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     box-sizing:border-box;
   }}
 
-  /* A "folha" branca como PDF */
   .paper {{
     max-width: 100%;
     margin: 0 auto;
@@ -1532,7 +1522,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     overflow: hidden;
   }}
 
-  /* iframe isola o CSS do HTML de cada página */
   .paper iframe {{
     width:100%;
     border:0;
@@ -1592,7 +1581,9 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   </div>
 
 <script>
-  const items = {payload_json};
+  // ✅ BLINDADO: JSON vem por base64 (não quebra com </script>)
+  const items = JSON.parse(atob("{payload_b64}"));
+
   let idx = {start_index};
 
   const strip = document.getElementById("strip");
@@ -1602,7 +1593,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   const appRoot = document.getElementById("appRoot");
 
   function topbarPx() {{
-    // Lê a altura real da topbar (com clamp aplicado)
     const tb = document.querySelector(".topbar");
     return tb ? tb.getBoundingClientRect().height : 54;
   }}
@@ -1710,7 +1700,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     if (e.key === "Escape") exitFullscreen();
   }});
 
-  // Recalcula altura quando redimensiona / gira
   function resizeIframes() {{
     const iframes = strip.querySelectorAll("iframe");
     const h = Math.max(window.innerHeight - topbarPx() - 28, 420);
@@ -1722,16 +1711,11 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   buildSlides();
   goTo(idx);
-
-  // Observação: fullscreen só funciona com gesto do usuário -> não forçamos automaticamente.
 </script>
 </body>
 </html>
 """
     components.html(html, height=height, scrolling=False)
- 
- 
-
 
 # ==============================================================
 # 14) HOME

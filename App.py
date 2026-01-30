@@ -1437,7 +1437,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .stage {{
     position:fixed;
-    top:54px; left:0; right:0; bottom:0;
+    top: clamp(3px, 4vh, 16px); left:0; right:0; bottom:0;
     background:#050505;
     overflow:hidden;
     touch-action: pan-y; /* permite scroll vertical dentro do slide */

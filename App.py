@@ -1456,16 +1456,29 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     overflow:hidden;
   }}
 
-  .topbar {{
-    position:fixed; top:0; left:0; right:0;
-    height:clamp(3px, 4vh, 54px);
-    display:flex; align-items:center; justify-content:space-between;
+  html = f"""
+<style>
+.topbar {{
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+
+    height: clamp(3px, 4vh, 54px);
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
     padding: 0 clamp(6px, 2vw, 16px);
-    background:rgba(0,0,0,0.62);
-    z-index:10;
-    box-sizing:border-box;
+
+    background: rgba(0,0,0,0.62);
+    z-index: 10;
+    box-sizing: border-box;
     backdrop-filter: blur(3px);
-  }}
+}}
+</style>
+"""
 
   .title {{
     color:#fff;

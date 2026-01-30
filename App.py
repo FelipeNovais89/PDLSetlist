@@ -1393,7 +1393,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   html, body {{
     margin:0; padding:0; height:100%; width:100%;
     background:#000; overflow:hidden;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Courier New, sans-serif;
   }}
 
   /* Container ocupa tudo (tenta "parecer F11") */
@@ -1412,7 +1412,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     background:rgba(0,0,0,0.62);
     z-index:10;
     box-sizing:border-box;
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(3px);
   }}
 
   .title {{

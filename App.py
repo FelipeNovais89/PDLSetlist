@@ -1406,7 +1406,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .topbar {{
     position:fixed; top:0; left:0; right:0;
-    height:clamp(12px, 2.5vh, 54px);
+    height:clamp(6px, 2.5vh, 54px);
     display:flex; align-items:center; justify-content:space-between;
     padding: 0 clamp(6px, 2vw, 16px);
     background:rgba(0,0,0,0.62);
@@ -1466,7 +1466,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     margin: 0 auto;
     background: #fff;
     color: #111;
-    border-radius: 12px;
+    border-radius: 0px;
     padding: 0;
     box-sizing:border-box;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);

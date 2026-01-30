@@ -1417,7 +1417,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .title {{
     color:#fff;
-    font-size:14px;
+    font-size: clamp(6px, 2vw, 16px);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;

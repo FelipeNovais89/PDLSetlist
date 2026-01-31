@@ -1151,6 +1151,228 @@ def render_song_database():
                 )
 
 # ==============================================================
+# 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
+# ==============================================================
+
+def get_footer_context(blocks, cur_block_idx, cur_item_idx):
+    """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
+    if cur_block_idx is None or cur_item_idx is None:
+        return "none", None
+
+    b = cur_block_idx
+    i = cur_item_idx + 1
+
+    while b < len(blocks):
+        items = blocks[b].get("items", [])
+        if i < len(items):
+            return "next", items[i]
+        b += 1
+        i = 0
+
+    return "none", None
+
+
+def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
+
+    title = item.get("title", "")
+    artist = item.get("artist", "")
+    bpm = item.get("bpm", "")
+    tom = item.get("tom", "")
+
+    obs = item.get("obs", "") or ""
+    prep = item.get("preparacao", "") or ""
+
+    # ========= cifra =========
+    cifra_txt = ""
+    use_s = item.get("use_simplificada", False)
+    cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
+
+    if cid:
+        cifra_txt = load_chord_from_drive(cid)
+    else:
+        cifra_txt = item.get("text", "")
+
+    cifra_show = strip_chord_markers_for_display(cifra_txt)
+
+    # ========= próxima =========
+    next_title = ""
+    next_artist = ""
+    next_tom = ""
+    next_bpm = ""
+
+    if footer_mode == "next" and footer_next_item:
+        next_title = footer_next_item.get("title", "")
+        next_artist = footer_next_item.get("artist", "")
+        next_tom = footer_next_item.get("tom", "")
+        next_bpm = footer_next_item.get("bpm", "")
+
+    def esc(s: str) -> str:
+        return (
+            (s or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    # ==========================================================
+    # ⚠️ TUDO DENTRO DE UMA ÚNICA f""" """  (MUUUUITO IMPORTANTE)
+    # ==========================================================
+
+    html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+
+<style>
+
+body {{
+    font-family: Arial, sans-serif;
+    margin:0;
+    background:white;
+    color:#111;
+}}
+
+.sheet {{
+    width:100%;
+    max-width:1000px;
+    margin:auto;
+    padding:14px;
+}}
+
+.top {{
+    display:grid;
+    grid-template-columns: 1fr auto auto;
+    gap:10px;
+    border-bottom:1px solid #ddd;
+    padding-bottom:8px;
+}}
+
+.title {{
+    font-size: clamp(14px, 2.2vw, 22px);
+    font-weight:800;
+}}
+
+.artist {{
+    font-size: clamp(11px, 1.8vw, 14px);
+    color:#555;
+}}
+
+.kv {{
+    text-align:right;
+    font-size: clamp(10px, 1.6vw, 13px);
+}}
+
+.section-title {{
+    margin-top:10px;
+    font-weight:800;
+    font-size:12px;
+}}
+
+.box {{
+    border-top:1px solid #ddd;
+    border-bottom:1px solid #ddd;
+    padding:6px 0;
+    min-height:20px;
+    font-size:12px;
+    white-space:pre-wrap;
+}}
+
+.cifra {{
+    font-family: "Courier New", monospace;
+    white-space: pre;
+    overflow:hidden;
+    margin-top:10px;
+    padding:10px;
+    border:1px solid #eee;
+    border-radius:10px;
+
+    font-size:14px;
+    line-height:1.25;
+}}
+
+.next {{
+    margin-top:12px;
+    border-top:1px solid #ddd;
+    padding-top:10px;
+    display:grid;
+    grid-template-columns: 1fr auto auto;
+    gap:10px;
+}}
+
+</style>
+</head>
+
+<body>
+
+<div class="sheet">
+
+  <div class="top">
+    <div>
+      <div class="title">{esc(title)}</div>
+      <div class="artist">{esc(artist)}</div>
+    </div>
+
+    <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
+  </div>
+
+  <div class="section-title">OBS.:</div>
+  <div class="box">{esc(obs)}</div>
+
+  <div class="cifra">{esc(cifra_show)}</div>
+
+  <div class="section-title">PREPARAÇÃO:</div>
+  <div class="box">{esc(prep)}</div>
+
+  <div class="next">
+    <div>
+      <div class="title">{esc(next_title)}</div>
+      <div class="artist">{esc(next_artist)}</div>
+    </div>
+    <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
+  </div>
+
+</div>
+
+<script>
+(function() {{
+
+  const box = document.querySelector('.cifra');
+  if (!box) return;
+
+  const MAX = 14;
+  const MIN = 8;
+  const STEP = 0.5;
+
+  function fits() {{
+    return box.scrollWidth <= box.clientWidth;
+  }}
+
+  function fit() {{
+    let px = MAX;
+    box.style.fontSize = px + 'px';
+
+    while(px > MIN && !fits()) {{
+        px -= STEP;
+        box.style.fontSize = px + 'px';
+    }}
+  }}
+
+  window.addEventListener('load', fit);
+  window.addEventListener('resize', fit);
+
+}})();
+</script>
+
+</body>
+</html>
+"""
+
+    return html
+
+# ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
 import streamlit.components.v1 as components

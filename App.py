@@ -1452,6 +1452,10 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
+# ==============================================================
+# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean mode (sem botões)
+# ==============================================================
+
 import streamlit.components.v1 as components
 import json
 
@@ -1493,47 +1497,11 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .app { position:fixed; inset:0; background:#000; overflow:hidden; }
 
-  /* TOPBAR (mantendo seus valores visíveis) */
-  .topbar {
-    position:fixed; top:0; left:0; right:0;
-    height: 2vh;   /* <<== agora com ; */
-    min-height: 36px;
-    max-height: 54px;
-
-    display:flex; align-items:center; justify-content:space-between;
-    padding: 0 clamp(6px, 2vw, 16px);
-
-    background:rgba(0,0,0,0.62);
-    z-index:10;
-    box-sizing:border-box;
-    backdrop-filter: blur(3px);
-  }
-
-  .title {
-    color:#fff;
-    font-size: clamp(6px, 2vw, 16px);
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    max-width:62vw;
-    opacity:0.95;
-  }
-
-  .btn {
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.18);
-    color:#fff;
-    border-radius: clamp(0.5px, 0.5vw, 16px);
-    padding: clamp(3.5px, 0.5vh, 8px) clamp(4px, 0.75vw, 12px);
-    font-size: clamp(2.5px, 2.5vw, 8px);
-    cursor:pointer;
-  }
-
+  /* Sem topbar / sem botões / sem texto / sem dots */
   .stage {
     position:fixed;
-    top: clamp(3px, 2vh, 54px);
-    left:0; right:0; bottom:0;
-    background:#050505;
+    top:0; left:0; right:0; bottom:0;
+    background:#000;
     overflow:hidden;
     touch-action: pan-y;
   }
@@ -1551,71 +1519,59 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     height:100%;
     overflow:auto;
     -webkit-overflow-scrolling: touch;
-    padding: 14px;
+    padding: 0;               /* sem borda */
     box-sizing:border-box;
   }
 
   .paper {
     width: 100%;
-    height:100%;
     max-width: 100%;
     margin: 0 auto;
     background: #fff;
     color: #111;
-    border-radius: 0px;
+    border-radius: 0;
     padding: 0;
     box-sizing:border-box;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    box-shadow: none;         /* sem sombra (pode ligar se quiser) */
     overflow: hidden;
   }
 
-  /* iframe sempre ocupa o slide inteiro disponível */
+  /* iframe ocupa tudo */
   .paper iframe{
     width:100%;
-    height: calc(100vh - clamp(3px, 2vh, 54px) - 28px);
+    height: 100vh;
     border:0;
     display:block;
     background:#fff;
   }
 
-  .dots {
-    position:fixed;
-    bottom:10px;
-    left:50%;
-    transform:translateX(-50%);
-    display:flex;
-    gap:6px;
-    z-index:10;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(0,0,0,0.62);
+  /* ZONAS DE SWIPE (por cima do iframe) */
+  .swipe-zone{
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 14vw;      /* ajuste se quiser: 10vw, 12vw, 15vw */
+    max-width: 140px;
+    z-index: 30;
+    background: transparent;
+    touch-action: pan-y; /* mantém scroll vertical */
   }
+  #swipeLeft { left: 0; }
+  #swipeRight { right: 0; }
 
-  .dot { width:7px; height:7px; border-radius:50%; background: rgba(255,255,255,0.25); }
-  .dot.active { background: rgba(255,255,255,0.90); }
+  /* (Opcional) evita seleção acidental */
+  * { -webkit-tap-highlight-color: transparent; }
 </style>
 </head>
 <body>
   <div class="app" id="appRoot">
-    <div class="topbar">
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btn" id="prevBtn">◀</button>
-        <button class="btn" id="nextBtn">▶</button>
-      </div>
-
-      <div class="title" id="title"></div>
-
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btn" id="fsBtn">Fullscreen</button>
-        <button class="btn" id="exitBtn">Sair</button>
-      </div>
-    </div>
-
     <div class="stage" id="stage">
       <div class="strip" id="strip"></div>
     </div>
 
-    <div class="dots" id="dots"></div>
+    <!-- zonas de swipe -->
+    <div class="swipe-zone" id="swipeLeft"></div>
+    <div class="swipe-zone" id="swipeRight"></div>
   </div>
 
   <script id="payload" type="application/json">__PAYLOAD_JSON__</script>
@@ -1631,21 +1587,22 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   let idx = __START_INDEX__;
 
   const strip = document.getElementById("strip");
-  const title = document.getElementById("title");
-  const dots  = document.getElementById("dots");
-  const stage = document.getElementById("stage");
   const appRoot = document.getElementById("appRoot");
 
   function buildSlides() {
     strip.innerHTML = "";
-    dots.innerHTML = "";
 
     if (!items.length) {
-      title.textContent = "ERRO: items vazio (payload não carregou)";
+      // fallback visual simples
+      const div = document.createElement("div");
+      div.style.color = "#fff";
+      div.style.padding = "16px";
+      div.textContent = "ERRO: items vazio (payload não carregou)";
+      strip.appendChild(div);
       return;
     }
 
-    items.forEach((it, i) => {
+    items.forEach((it) => {
       const s = document.createElement("div");
       s.className = "slide";
 
@@ -1653,24 +1610,16 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
       p.className = "paper";
 
       const fr = document.createElement("iframe");
-      fr.srcdoc = it.html;   // <- aqui é o mais confiável
+      fr.srcdoc = it.html;
 
       p.appendChild(fr);
       s.appendChild(p);
       strip.appendChild(s);
-
-      const d = document.createElement("div");
-      d.className = "dot";
-      d.onclick = () => goTo(i);
-      dots.appendChild(d);
     });
   }
 
   function updateUI() {
     if (!items.length) return;
-    const t = items[idx]?.title || "Cifra";
-    title.textContent = (idx+1) + "/" + items.length + " • " + t + "   (items: " + items.length + ")";
-    [...dots.children].forEach((d, i) => d.classList.toggle("active", i === idx));
     strip.style.transform = "translateX(" + (-idx * 100) + "%)";
     const currentSlide = strip.children[idx];
     if (currentSlide) currentSlide.scrollTo(0, 0);
@@ -1680,42 +1629,53 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   function next() { goTo(idx + 1); }
   function prev() { goTo(idx - 1); }
 
-  document.getElementById("nextBtn").onclick = next;
-  document.getElementById("prevBtn").onclick = prev;
+  // Swipe pelas zonas laterais (funciona mesmo com iframe)
+  function bindSwipe(el) {
+    let x0=null, y0=null, t0=null;
 
-  document.getElementById("fsBtn").onclick = () => {
+    el.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      x0=t.clientX; y0=t.clientY; t0=Date.now();
+    }, {passive:true});
+
+    el.addEventListener("touchend", (e) => {
+      if (x0===null) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - x0;
+      const dy = t.clientY - y0;
+      const dt = Date.now() - t0;
+
+      if (Math.abs(dx) > 50 && Math.abs(dy) < 80 && dt < 800) {
+        if (dx < 0) next(); else prev();
+      }
+      x0=null; y0=null; t0=null;
+    }, {passive:true});
+  }
+
+  bindSwipe(document.getElementById("swipeLeft"));
+  bindSwipe(document.getElementById("swipeRight"));
+
+  // Teclas (útil no desktop / pedal que manda setas)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") next();
+    if (e.key === "ArrowLeft") prev();
+  });
+
+  // (Opcional) tentar fullscreen automaticamente:
+  // Só funciona se este viewer tiver sido aberto por gesto do usuário.
+  function tryEnterFullscreen() {
     try {
-      if (!document.fullscreenElement && appRoot.requestFullscreen) appRoot.requestFullscreen();
+      if (!document.fullscreenElement && appRoot.requestFullscreen) {
+        appRoot.requestFullscreen();
+      }
     } catch(e) {}
-  };
-
-  document.getElementById("exitBtn").onclick = () => {
-    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch(e) {}
-    title.textContent = "Use 'Voltar' no app";
-  };
-
-  // Swipe
-  let x0=null, y0=null, t0=null;
-  stage.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    x0=t.clientX; y0=t.clientY; t0=Date.now();
-  }, {passive:true});
-
-  stage.addEventListener("touchend", (e) => {
-    if (x0===null) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - x0;
-    const dy = t.clientY - y0;
-    const dt = Date.now() - t0;
-
-    if (Math.abs(dx) > 70 && Math.abs(dy) < 70 && dt < 800) {
-      if (dx < 0) next(); else prev();
-    }
-    x0=null; y0=null; t0=null;
-  }, {passive:true});
+  }
 
   buildSlides();
   goTo(idx);
+
+  // Descomente se você quiser tentar entrar fullscreen ao abrir:
+  // tryEnterFullscreen();
 </script>
 </body>
 </html>
@@ -1725,6 +1685,8 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     html = html.replace("__START_INDEX__", str(start_index))
 
     components.html(html, height=height, scrolling=False)
+
+  
 
 # ==============================================================
 # 14) HOME

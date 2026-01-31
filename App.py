@@ -1937,7 +1937,7 @@ def main():
             slides=slides,
             titles=titles,
             start_index=start_index,
-            height=700;
+            height=700,
         )
 
 

@@ -1234,10 +1234,9 @@ body {{
 }}
 
 .sheet {{
-    width:100%;
-    max-width:1000px;
+    width:clamp(90%, 100%, 100%);
     margin:auto;
-    padding:1px;
+    padding:clamp(2px, 1vw, 5px);
 }}
 
 .top {{

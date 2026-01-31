@@ -1884,9 +1884,9 @@ def main():
             html_current = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)
 
             st.components.v1.html(
-                html_current,
-                height=700,
-                scrolling=false,
+                html_current;
+                height=700;
+                scrolling= false;
             )
             return
 
@@ -1937,7 +1937,7 @@ def main():
             slides=slides,
             titles=titles,
             start_index=start_index,
-            height=700
+            height=700;
         )
 
 

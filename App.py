@@ -1886,7 +1886,7 @@ def main():
             st.components.v1.html(
                 html_current,
                 height=700,
-                scrolling= false,
+                scrolling=False,
             )
             return
 
@@ -1937,7 +1937,7 @@ def main():
             slides=slides,
             titles=titles,
             start_index=start_index,
-            height=700,
+            height=700
         )
 
 

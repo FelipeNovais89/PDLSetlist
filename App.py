@@ -1241,7 +1241,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   /* ✅ wrapper do container */
   .outer {{
       width:100%;
-      height:100%
+      height:100%;
       overflow-x:hidden;
       padding:0;
       margin:0;
@@ -1249,7 +1249,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
   /* ✅ tudo que é “folha” fica aqui dentro e pode ser escalado */
   .scale-root {{
-      width:max-content;          /* mede largura real do conteúdo */
+      width:max-content;       /* mede largura real do conteúdo */
+      height:max-content;
       transform-origin: top left; /* escala a partir do topo/esquerda */
   }}
 
@@ -1257,7 +1258,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       width:clamp(90%, 100%, 100%);   /* mantém seus valores */
       aspect-ratio: 9 / 16;   /* ⭐ AQUI */
       margin:auto;
-      padding:clamp(2px, 1vw, 5px);
+      padding:clamp(5px, 1vw, 10px);
       box-sizing:border-box;
   }}
 

@@ -1237,7 +1237,7 @@ body {{
     width:100%;
     max-width:1000px;
     margin:auto;
-    padding:14px;
+    padding:1px;
 }}
 
 .top {{

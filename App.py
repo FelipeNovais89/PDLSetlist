@@ -1154,6 +1154,10 @@ def render_song_database():
 # 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================
 
+# ==============================================================
+# 13) PREVIEW (HTML responsivo + auto-fit folha + auto-fit cifra + OBS/PREPARAÇÃO)
+# ==============================================================
+
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
     """Retorna (modo, next_item_dict) onde modo pode ser 'next' ou 'none'."""
     if cur_block_idx is None or cur_item_idx is None:
@@ -1214,153 +1218,225 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
             .replace(">", "&gt;")
         )
 
-    # ==========================================================
-    # ⚠️ TUDO DENTRO DE UMA ÚNICA f""" """  (MUUUUITO IMPORTANTE)
-    # ==========================================================
-
     html = f"""
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
 <style>
+  html, body {{
+      margin:0;
+      padding:0;
+      background:white;
+      color:#111;
+      overflow-x:hidden; /* ✅ mata scroll lateral */
+  }}
 
-body {{
-    font-family: Arial, sans-serif;
-    margin:0;
-    background:white;
-    color:#111;
-}}
+  body {{
+      font-family: Arial, sans-serif;
+  }}
 
-.sheet {{
-    width:clamp(90%, 100%, 100%);
-    margin:auto;
-    padding:clamp(2px, 1vw, 5px);
-}}
+  /* ✅ wrapper do container */
+  .outer {{
+      width:100%;
+      overflow-x:hidden;
+      padding:0;
+      margin:0;
+  }}
 
-.top {{
-    display:grid;
-    grid-template-columns: 1fr auto auto;
-    gap:10px;
-    border-bottom:1px solid #ddd;
-    padding-bottom:8px;
-}}
+  /* ✅ tudo que é “folha” fica aqui dentro e pode ser escalado */
+  .scale-root {{
+      width:max-content;          /* mede largura real do conteúdo */
+      transform-origin: top left; /* escala a partir do topo/esquerda */
+  }}
 
-.title {{
-    font-size: clamp(14px, 2.2vw, 22px);
-    font-weight:800;
-}}
+  .sheet {{
+      width:clamp(90%, 100%, 100%);   /* mantém seus valores */
+      margin:auto;
+      padding:clamp(2px, 1vw, 5px);
+      box-sizing:border-box;
+  }}
 
-.artist {{
-    font-size: clamp(11px, 1.8vw, 14px);
-    color:#555;
-}}
+  .top {{
+      display:grid;
+      grid-template-columns: 1fr auto auto;
+      gap:10px;
+      border-bottom:1px solid #ddd;
+      padding-bottom:8px;
+  }}
 
-.kv {{
-    text-align:right;
-    font-size: clamp(10px, 1.6vw, 13px);
-}}
+  .title {{
+      font-size: clamp(14px, 2.2vw, 22px);
+      font-weight:800;
+  }}
 
-.section-title {{
-    margin-top:10px;
-    font-weight:800;
-    font-size:12px;
-}}
+  .artist {{
+      font-size: clamp(11px, 1.8vw, 14px);
+      color:#555;
+  }}
 
-.box {{
-    border-top:1px solid #ddd;
-    border-bottom:1px solid #ddd;
-    padding:6px 0;
-    min-height:20px;
-    font-size:12px;
-    white-space:pre-wrap;
-}}
+  .kv {{
+      text-align:right;
+      font-size: clamp(10px, 1.6vw, 13px);
+  }}
 
-.cifra {{
-    font-family: "Courier New", monospace;
-    white-space: pre;
-    overflow:hidden;
-    margin-top:10px;
-    padding:10px;
-    border:1px solid #eee;
-    border-radius:10px;
+  .section-title {{
+      margin-top:10px;
+      font-weight:800;
+      font-size:12px;
+  }}
 
-    font-size:14px;
-    line-height:1.25;
-}}
+  .box {{
+      border-top:1px solid #ddd;
+      border-bottom:1px solid #ddd;
+      padding:6px 0;
+      min-height:20px;
+      font-size:12px;
+      white-space:pre-wrap;
+      box-sizing:border-box;
+  }}
 
-.next {{
-    margin-top:12px;
-    border-top:1px solid #ddd;
-    padding-top:10px;
-    display:grid;
-    grid-template-columns: 1fr auto auto;
-    gap:10px;
-}}
+  .cifra {{
+      font-family: "Courier New", monospace;
+      white-space: pre;
+      overflow:hidden;
+      margin-top:10px;
+      padding:10px;
+      border:1px solid #eee;
+      border-radius:10px;
 
+      font-size:14px;
+      line-height:1.25;
+      box-sizing:border-box;
+
+      max-width: 100%; /* ✅ impede “estouro” */
+  }}
+
+  .next {{
+      margin-top:12px;
+      border-top:1px solid #ddd;
+      padding-top:10px;
+      display:grid;
+      grid-template-columns: 1fr auto auto;
+      gap:10px;
+  }}
 </style>
 </head>
 
 <body>
 
-<div class="sheet">
+  <div class="outer" id="outer">
+    <div class="scale-root" id="scaleRoot">
+      <div class="sheet" id="sheet">
 
-  <div class="top">
-    <div>
-      <div class="title">{esc(title)}</div>
-      <div class="artist">{esc(artist)}</div>
+        <div class="top">
+          <div>
+            <div class="title">{esc(title)}</div>
+            <div class="artist">{esc(artist)}</div>
+          </div>
+
+          <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
+          <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
+        </div>
+
+        <div class="section-title">OBS.:</div>
+        <div class="box">{esc(obs)}</div>
+
+        <div class="cifra">{esc(cifra_show)}</div>
+
+        <div class="section-title">PREPARAÇÃO:</div>
+        <div class="box">{esc(prep)}</div>
+
+        <div class="next">
+          <div>
+            <div class="title">{esc(next_title)}</div>
+            <div class="artist">{esc(next_artist)}</div>
+          </div>
+          <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
+          <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
+        </div>
+
+      </div>
     </div>
-
-    <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
-    <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
   </div>
-
-  <div class="section-title">OBS.:</div>
-  <div class="box">{esc(obs)}</div>
-
-  <div class="cifra">{esc(cifra_show)}</div>
-
-  <div class="section-title">PREPARAÇÃO:</div>
-  <div class="box">{esc(prep)}</div>
-
-  <div class="next">
-    <div>
-      <div class="title">{esc(next_title)}</div>
-      <div class="artist">{esc(next_artist)}</div>
-    </div>
-    <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
-    <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
-  </div>
-
-</div>
 
 <script>
 (function() {{
 
+  // ================================
+  // 1) AUTO-FIT DA FOLHA (SCALE)
+  // ================================
+  const outer = document.getElementById("outer");
+  const scaleRoot = document.getElementById("scaleRoot");
+  const sheet = document.getElementById("sheet");
+
+  function fitSheet() {{
+    if (!outer || !scaleRoot || !sheet) return;
+
+    // reseta escala pra medir “real”
+    scaleRoot.style.transform = "scale(1)";
+
+    // largura real do conteúdo (a folha)
+    const contentW = scaleRoot.scrollWidth || sheet.scrollWidth || 1;
+    const availW = outer.clientWidth || window.innerWidth || 1;
+
+    // escala só pra baixo (nunca aumenta)
+    const scale = Math.min(1, availW / contentW);
+
+    scaleRoot.style.transform = "scale(" + scale + ")";
+
+    // ajusta a altura do body pra não cortar (importante em iframe)
+    const contentH = (scaleRoot.scrollHeight || sheet.scrollHeight || 1) * scale;
+    document.body.style.height = contentH + "px";
+  }}
+
+  // ==========================================
+  // 2) AUTO-FIT DA CIFRA (REDUZ FONT ATÉ CABER)
+  // ==========================================
   const box = document.querySelector('.cifra');
-  if (!box) return;
 
   const MAX = 14;
   const MIN = 8;
   const STEP = 0.5;
 
-  function fits() {{
+  function fitsCifra() {{
+    if (!box) return true;
     return box.scrollWidth <= box.clientWidth;
   }}
 
-  function fit() {{
+  function fitCifra() {{
+    if (!box) return;
+
     let px = MAX;
     box.style.fontSize = px + 'px';
 
-    while(px > MIN && !fits()) {{
-        px -= STEP;
-        box.style.fontSize = px + 'px';
+    while(px > MIN && !fitsCifra()) {{
+      px -= STEP;
+      box.style.fontSize = px + 'px';
     }}
   }}
 
-  window.addEventListener('load', fit);
-  window.addEventListener('resize', fit);
+  // roda na carga e resize
+  function runAll() {{
+    // duas RAFs ajudam o layout estabilizar no Streamlit/iframe
+    requestAnimationFrame(() => {{
+      requestAnimationFrame(() => {{
+        fitCifra();
+        fitSheet();
+      }});
+    }});
+  }}
+
+  window.addEventListener('load', runAll);
+  window.addEventListener('resize', runAll);
+
+  // em alguns mobiles, "orientationchange" ajuda
+  window.addEventListener('orientationchange', runAll);
+
+  // primeira execução
+  runAll();
 
 }})();
 </script>

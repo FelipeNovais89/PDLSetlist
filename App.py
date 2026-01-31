@@ -1155,7 +1155,7 @@ def render_song_database():
 # ==============================================================
 
 # ==============================================================
-# 13) PREVIEW (HTML responsivo + auto-fit folha + auto-fit cifra + OBS/PREPARAÇÃO)
+# 13) PREVIEW (HTML responsivo + folha 9:16 + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================
 
 def get_footer_context(blocks, cur_block_idx, cur_item_idx):
@@ -1223,42 +1223,32 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 <html>
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
 <style>
-  html, body {{
-      margin:0;
-      padding:0;
-      background:white;
-      color:#111;
-      overflow-x:hidden; /* ✅ mata scroll lateral */
-  }}
-
   body {{
       font-family: Arial, sans-serif;
-  }}
-
-  /* ✅ wrapper do container */
-  .outer {{
-      width:100%;
-      overflow-x:hidden;
-      padding:0;
       margin:0;
+      background:white;
+      color:#111;
   }}
 
-  /* ✅ tudo que é “folha” fica aqui dentro e pode ser escalado */
-  .scale-root {{
-      width:max-content;       /* mede largura real do conteúdo */
-      height:max-content;
-      transform-origin: top left; /* escala a partir do topo/esquerda */
-  }}
-
+  # ==========================================================
+     FOLHA 9:16 (cabendo no viewport REAL do iframe)
+     ========================================================== ##
   .sheet {{
-      width:clamp(90%, 100%, 100%);   /* mantém seus valores */
-      aspect-ratio: 3 / 4;   /* ⭐ AQUI */
-      margin:auto;
-      padding:clamp(5px, 1vw, 10px);
-      box-sizing:border-box;
+      /* largura vai ser ajustada por JS; aqui deixamos limites */
+      width: min(100%, 900px);
+
+      /* força proporção 9:16 */
+      aspect-ratio: 9 / 16;
+
+      margin: auto;
+      padding: clamp(2px, 1vw, 5px);
+      box-sizing: border-box;
+      overflow: hidden;
+
+      /* altura calculada por JS (quando existir) */
+      height: var(--sheetH, auto);
   }}
 
   .top {{
@@ -1297,7 +1287,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       min-height:20px;
       font-size:12px;
       white-space:pre-wrap;
-      box-sizing:border-box;
   }}
 
   .cifra {{
@@ -1311,9 +1300,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
       font-size:14px;
       line-height:1.25;
-      box-sizing:border-box;
-
-      max-width: 100%; /* ✅ impede “estouro” */
   }}
 
   .next {{
@@ -1329,116 +1315,105 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 <body>
 
-  <div class="outer" id="outer">
-    <div class="scale-root" id="scaleRoot">
-      <div class="sheet" id="sheet">
+<div class="sheet">
 
-        <div class="top">
-          <div>
-            <div class="title">{esc(title)}</div>
-            <div class="artist">{esc(artist)}</div>
-          </div>
-
-          <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
-          <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
-        </div>
-
-        <div class="section-title">OBS.:</div>
-        <div class="box">{esc(obs)}</div>
-
-        <div class="cifra">{esc(cifra_show)}</div>
-
-        <div class="section-title">PREPARAÇÃO:</div>
-        <div class="box">{esc(prep)}</div>
-
-        <div class="next">
-          <div>
-            <div class="title">{esc(next_title)}</div>
-            <div class="artist">{esc(next_artist)}</div>
-          </div>
-          <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
-          <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
-        </div>
-
-      </div>
+  <div class="top">
+    <div>
+      <div class="title">{esc(title)}</div>
+      <div class="artist">{esc(artist)}</div>
     </div>
+
+    <div class="kv"><b>TOM</b><br>{esc(tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(bpm)}</div>
   </div>
+
+  <div class="section-title">OBS.:</div>
+  <div class="box">{esc(obs)}</div>
+
+  <div class="cifra">{esc(cifra_show)}</div>
+
+  <div class="section-title">PREPARAÇÃO:</div>
+  <div class="box">{esc(prep)}</div>
+
+  <div class="next">
+    <div>
+      <div class="title">{esc(next_title)}</div>
+      <div class="artist">{esc(next_artist)}</div>
+    </div>
+    <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
+    <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
+  </div>
+
+</div>
 
 <script>
 (function() {{
 
-  // ================================
-  // 1) AUTO-FIT DA FOLHA (SCALE)
-  // ================================
-  const outer = document.getElementById("outer");
-  const scaleRoot = document.getElementById("scaleRoot");
-  const sheet = document.getElementById("sheet");
-
+  // ==========================================================
+  // (A) FIT DA FOLHA 9:16 PARA CABER NO VIEWPORT DO IFRAME
+  // ==========================================================
   function fitSheet() {{
-    if (!outer || !scaleRoot || !sheet) return;
+    const sheet = document.querySelector('.sheet');
+    if(!sheet) return;
 
-    // reseta escala pra medir “real”
-    scaleRoot.style.transform = "scale(1)";
+    // viewport real do iframe
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
 
-    // largura real do conteúdo (a folha)
-    const contentW = scaleRoot.scrollWidth || sheet.scrollWidth || 1;
-    const availW = outer.clientWidth || window.innerWidth || 1;
+    // folga
+    const pad = 8;
 
-    // escala só pra baixo (nunca aumenta)
-    const scale = Math.min(1, availW / contentW);
+    // 9:16 => H = W*(16/9)
+    let w = vw - pad*2;
+    let h = w * (16/9);
 
-    scaleRoot.style.transform = "scale(" + scale + ")";
+    // se estourar altura, recalcula pela altura
+    if (h > (vh - pad*2)) {{
+      h = vh - pad*2;
+      w = h * (9/16);
+    }}
 
-    // ajusta a altura do body pra não cortar (importante em iframe)
-    const contentH = (scaleRoot.scrollHeight || sheet.scrollHeight || 1) * scale;
-    document.body.style.height = contentH + "px";
+    sheet.style.setProperty('--sheetH', h + 'px');
+    sheet.style.width = w + 'px';
   }}
 
-  // ==========================================
-  // 2) AUTO-FIT DA CIFRA (REDUZ FONT ATÉ CABER)
-  // ==========================================
-  const box = document.querySelector('.cifra');
-
-  const MAX = 14;
-  const MIN = 8;
-  const STEP = 0.5;
-
-  function fitsCifra() {{
-    if (!box) return true;
-    return box.scrollWidth <= box.clientWidth;
-  }}
-
+  ## ==========================================================
+  ## (B) AUTO-FIT DA CIFRA (REDUZ FONTE ATÉ CABER NA LARGURA)
+  ## ==========================================================
   function fitCifra() {{
+    const box = document.querySelector('.cifra');
     if (!box) return;
+
+    const MAX = 14;
+    const MIN = 8;
+    const STEP = 0.5;
+
+    function fits() {{
+      return box.scrollWidth <= box.clientWidth;
+    }}
 
     let px = MAX;
     box.style.fontSize = px + 'px';
 
-    while(px > MIN && !fitsCifra()) {{
+    while (px > MIN && !fits()) {{
       px -= STEP;
       box.style.fontSize = px + 'px';
     }}
   }}
 
-  // roda na carga e resize
   function runAll() {{
-    // duas RAFs ajudam o layout estabilizar no Streamlit/iframe
+    fitSheet();
+    // dá 2 frames pra layout estabilizar antes de medir a cifra
     requestAnimationFrame(() => {{
       requestAnimationFrame(() => {{
         fitCifra();
-        fitSheet();
       }});
     }});
   }}
 
   window.addEventListener('load', runAll);
   window.addEventListener('resize', runAll);
-
-  // em alguns mobiles, "orientationchange" ajuda
   window.addEventListener('orientationchange', runAll);
-
-  // primeira execução
-  runAll();
 
 }})();
 </script>
@@ -1446,7 +1421,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 </body>
 </html>
 """
-
     return html
 
 # ==============================================================

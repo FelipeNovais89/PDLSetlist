@@ -1453,7 +1453,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
 # ==============================================================
-# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean + botão fullscreen
+# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean + FS btn auto-hide
 # ==============================================================
 
 import streamlit.components.v1 as components
@@ -1555,30 +1555,42 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   #swipeLeft { left: 0; }
   #swipeRight { right: 0; }
 
-  /* BOTÃO FULLSCREEN (único) */
+  /* BOTÃO FULLSCREEN MENOR + AUTO-HIDE */
   .fsbtn{
     position: fixed;
     top: 10px;
     right: 10px;
-    z-index: 50;
-    width: 44px;
-    height: 44px;
+    z-index: 60;
+
+    width: 32px;
+    height: 32px;
+
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.25);
-    background: rgba(0,0,0,0.45);
+    background: rgba(0,0,0,0.42);
     color: #fff;
-    font-size: 18px;
-    line-height: 44px;
+
+    font-size: 14px;
+    line-height: 32px;
     text-align: center;
     cursor: pointer;
+
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition: opacity 160ms ease, transform 160ms ease;
   }
-  .fsbtn:active { transform: scale(0.98); }
 
-  /* quando estiver fullscreen, deixa o botão mais discreto */
+  .fsbtn.show{
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
   :fullscreen .fsbtn { background: rgba(0,0,0,0.30); }
-
 </style>
 </head>
 <body>
@@ -1591,13 +1603,17 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     <div class="swipe-zone" id="swipeLeft"></div>
     <div class="swipe-zone" id="swipeRight"></div>
 
-    <!-- único botão -->
+    <!-- botão -->
     <div class="fsbtn" id="fsBtn" title="Fullscreen">⛶</div>
   </div>
 
   <script id="payload" type="application/json">__PAYLOAD_JSON__</script>
 
 <script>
+  // ===== config =====
+  const AUTO_HIDE_MS = 2200; // tempo até sumir (ms)
+  // ==================
+
   let items = [];
   try {
     items = JSON.parse(document.getElementById("payload").textContent || "[]");
@@ -1610,6 +1626,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   const strip = document.getElementById("strip");
   const appRoot = document.getElementById("appRoot");
   const fsBtn = document.getElementById("fsBtn");
+  const stage = document.getElementById("stage");
 
   function buildSlides() {
     strip.innerHTML = "";
@@ -1687,20 +1704,42 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     } catch(e) {}
   }
 
-  fsBtn.addEventListener("click", () => {
+  fsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     if (document.fullscreenElement) exitFullscreen();
     else enterFullscreen();
+    showFsTemp();
   });
+
+  // AUTO-HIDE do botão: aparece ao tocar/clicar na "folha"
+  let hideTimer = null;
+
+  function showFsTemp() {
+    fsBtn.classList.add("show");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => fsBtn.classList.remove("show"), AUTO_HIDE_MS);
+  }
+
+  // Qualquer toque/click na stage mostra o botão
+  stage.addEventListener("click", showFsTemp, {passive:true});
+  stage.addEventListener("touchstart", showFsTemp, {passive:true});
+  // No desktop, mover mouse também ajuda
+  stage.addEventListener("mousemove", showFsTemp, {passive:true});
 
   // Teclas (pedal costuma mandar setas)
   document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") prev();
     if (e.key === "Escape") exitFullscreen();
+    // ao usar teclado, mostra o botão rapidinho (pra você saber que está “vivo”)
+    showFsTemp();
   });
 
   buildSlides();
   goTo(idx);
+
+  // Mostra o botão no início por 2s só pra você achar ele
+  showFsTemp();
 </script>
 </body>
 </html>

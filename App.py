@@ -1453,7 +1453,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
 # ==============================================================
 # ==============================================================
-# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean mode (sem botões)
+# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean + botão fullscreen
 # ==============================================================
 
 import streamlit.components.v1 as components
@@ -1478,8 +1478,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
     payload = [{"title": t, "html": h} for t, h in zip(titles, slides)]
     payload_json = json.dumps(payload, ensure_ascii=False)
-
-    # Evita quebrar o HTML caso exista </script> dentro do conteúdo
     payload_json_safe = payload_json.replace("</script>", "<\\/script>")
 
     html = """
@@ -1497,7 +1495,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   .app { position:fixed; inset:0; background:#000; overflow:hidden; }
 
-  /* Sem topbar / sem botões / sem texto / sem dots */
   .stage {
     position:fixed;
     top:0; left:0; right:0; bottom:0;
@@ -1519,7 +1516,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     height:100%;
     overflow:auto;
     -webkit-overflow-scrolling: touch;
-    padding: 0;               /* sem borda */
+    padding: 0;
     box-sizing:border-box;
   }
 
@@ -1532,11 +1529,10 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     border-radius: 0;
     padding: 0;
     box-sizing:border-box;
-    box-shadow: none;         /* sem sombra (pode ligar se quiser) */
+    box-shadow: none;
     overflow: hidden;
   }
 
-  /* iframe ocupa tudo */
   .paper iframe{
     width:100%;
     height: 100vh;
@@ -1550,17 +1546,39 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     position: fixed;
     top: 0;
     bottom: 0;
-    width: 14vw;      /* ajuste se quiser: 10vw, 12vw, 15vw */
+    width: 14vw;
     max-width: 140px;
     z-index: 30;
     background: transparent;
-    touch-action: pan-y; /* mantém scroll vertical */
+    touch-action: pan-y;
   }
   #swipeLeft { left: 0; }
   #swipeRight { right: 0; }
 
-  /* (Opcional) evita seleção acidental */
-  * { -webkit-tap-highlight-color: transparent; }
+  /* BOTÃO FULLSCREEN (único) */
+  .fsbtn{
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 50;
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    font-size: 18px;
+    line-height: 44px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .fsbtn:active { transform: scale(0.98); }
+
+  /* quando estiver fullscreen, deixa o botão mais discreto */
+  :fullscreen .fsbtn { background: rgba(0,0,0,0.30); }
+
 </style>
 </head>
 <body>
@@ -1569,9 +1587,12 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
       <div class="strip" id="strip"></div>
     </div>
 
-    <!-- zonas de swipe -->
+    <!-- swipe zones -->
     <div class="swipe-zone" id="swipeLeft"></div>
     <div class="swipe-zone" id="swipeRight"></div>
+
+    <!-- único botão -->
+    <div class="fsbtn" id="fsBtn" title="Fullscreen">⛶</div>
   </div>
 
   <script id="payload" type="application/json">__PAYLOAD_JSON__</script>
@@ -1588,12 +1609,11 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
   const strip = document.getElementById("strip");
   const appRoot = document.getElementById("appRoot");
+  const fsBtn = document.getElementById("fsBtn");
 
   function buildSlides() {
     strip.innerHTML = "";
-
     if (!items.length) {
-      // fallback visual simples
       const div = document.createElement("div");
       div.style.color = "#fff";
       div.style.padding = "16px";
@@ -1629,7 +1649,7 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   function next() { goTo(idx + 1); }
   function prev() { goTo(idx - 1); }
 
-  // Swipe pelas zonas laterais (funciona mesmo com iframe)
+  // Swipe pelas zonas laterais
   function bindSwipe(el) {
     let x0=null, y0=null, t0=null;
 
@@ -1655,27 +1675,32 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
   bindSwipe(document.getElementById("swipeLeft"));
   bindSwipe(document.getElementById("swipeRight"));
 
-  // Teclas (útil no desktop / pedal que manda setas)
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight") next();
-    if (e.key === "ArrowLeft") prev();
-  });
-
-  // (Opcional) tentar fullscreen automaticamente:
-  // Só funciona se este viewer tiver sido aberto por gesto do usuário.
-  function tryEnterFullscreen() {
+  // Fullscreen toggle
+  function enterFullscreen() {
     try {
-      if (!document.fullscreenElement && appRoot.requestFullscreen) {
-        appRoot.requestFullscreen();
-      }
+      if (!document.fullscreenElement && appRoot.requestFullscreen) appRoot.requestFullscreen();
+    } catch(e) {}
+  }
+  function exitFullscreen() {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
     } catch(e) {}
   }
 
+  fsBtn.addEventListener("click", () => {
+    if (document.fullscreenElement) exitFullscreen();
+    else enterFullscreen();
+  });
+
+  // Teclas (pedal costuma mandar setas)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") next();
+    if (e.key === "ArrowLeft") prev();
+    if (e.key === "Escape") exitFullscreen();
+  });
+
   buildSlides();
   goTo(idx);
-
-  // Descomente se você quiser tentar entrar fullscreen ao abrir:
-  // tryEnterFullscreen();
 </script>
 </body>
 </html>
@@ -1685,8 +1710,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     html = html.replace("__START_INDEX__", str(start_index))
 
     components.html(html, height=height, scrolling=False)
-
-  
 
 # ==============================================================
 # 14) HOME

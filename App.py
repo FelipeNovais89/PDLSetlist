@@ -1461,50 +1461,6 @@ def render_home():
         else:
             st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
 
-#-------------
-# 15.0
-#-------------
-
-def get_footer_context(blocks, cur_block_idx, cur_item_idx):
-    """
-    Define o que aparece no rodapé (próxima música) baseado na posição atual.
-    Retorna: (footer_mode, footer_next_item)
-      footer_mode: "next" ou "none"
-      footer_next_item: dict do próximo item (music/pause) ou None
-    """
-    try:
-        cur_block_idx = int(cur_block_idx) if cur_block_idx is not None else 0
-        cur_item_idx = int(cur_item_idx) if cur_item_idx is not None else -1
-    except Exception:
-        return "none", None
-
-    if not blocks:
-        return "none", None
-
-    def is_valid(it):
-        return isinstance(it, dict)
-
-    # 1) procura no bloco atual (depois do item atual)
-    try:
-        items = blocks[cur_block_idx].get("items", [])
-        for j in range(cur_item_idx + 1, len(items)):
-            it = items[j]
-            if is_valid(it):
-                return "next", it
-    except Exception:
-        pass
-
-    # 2) procura nos próximos blocos
-    for bi in range(cur_block_idx + 1, len(blocks)):
-        try:
-            items = blocks[bi].get("items", [])
-            for it in items:
-                if is_valid(it):
-                    return "next", it
-        except Exception:
-            continue
-
-    return "none", None
     
 # ==============================================================
 # 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES com TODAS as páginas)

@@ -1255,7 +1255,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
   .sheet {{
       width:clamp(90%, 100%, 100%);   /* mantém seus valores */
-      aspect-ratio: 9 / 16;   /* ⭐ AQUI */
+      aspect-ratio: 3 / 4;   /* ⭐ AQUI */
       margin:auto;
       padding:clamp(5px, 1vw, 10px);
       box-sizing:border-box;

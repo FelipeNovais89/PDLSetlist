@@ -1231,7 +1231,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
       padding:0;
       background:white;
       color:#111;
-      overflow-x:hidden; /* ✅ mata scroll lateral */
+      overflow-x:hidden;/* ✅ mata scroll lateral */
+      overflow-y:hidden;
   }}
 
   body {{

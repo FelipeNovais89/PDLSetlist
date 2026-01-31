@@ -1241,7 +1241,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   /* ✅ wrapper do container */
   .outer {{
       width:100%;
-      height:100%;
       overflow-x:hidden;
       padding:0;
       margin:0;

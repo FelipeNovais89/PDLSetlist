@@ -876,7 +876,174 @@ def render_selected_item_editor():
             key=f"pause_label_{b_idx}_{i_idx}",
         )
 
+# ==============================================================
+# 11.X) POPUP (MODAL) - SELETOR DE MÚSICAS DO BANCO (CHECKBOX)
+# ==============================================================
 
+def open_song_picker_dialog(b_idx: int, songs_df: pd.DataFrame):
+    """
+    Modal com checkbox para selecionar várias músicas do banco e adicionar no bloco b_idx.
+    Requer Streamlit com st.dialog().
+    """
+
+    # Se o Streamlit não tiver st.dialog, evita quebrar
+    if not hasattr(st, "dialog"):
+        st.warning("Sua versão do Streamlit não suporta st.dialog(). Atualize ou use o fallback.")
+        return
+
+    @st.dialog("Adicionar músicas ao bloco", width="large")
+    def _dialog():
+        st.caption("Marque as músicas que deseja adicionar neste bloco.")
+
+        # Busca
+        q = st.text_input("Buscar", value=st.session_state.get("song_picker_query", ""), placeholder="Digite parte do título ou artista…")
+        st.session_state.song_picker_query = q
+
+        df_local = songs_df.reset_index(drop=True).copy()
+
+        # Monta label por música (mesmo padrão do seu selectbox)
+        labels = []
+        idx_map = {}  # label -> row_idx
+        for row_idx, row in df_local.iterrows():
+            titulo = str(row.get("Título", "")).strip()
+            artista = str(row.get("Artista", "")).strip()
+            tom = str(row.get("Tom_Original", "")).strip()
+
+            if not titulo:
+                continue
+
+            label_opt = f"{titulo} – {artista}" if artista else titulo
+            if tom:
+                label_opt += f" ({tom})"
+
+            labels.append(label_opt)
+            idx_map[label_opt] = int(row_idx)
+
+        # Filtra por busca
+        if q.strip():
+            ql = q.strip().lower()
+            labels = [lb for lb in labels if ql in lb.lower()]
+
+        if not labels:
+            st.info("Nenhuma música encontrada com esse filtro.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Cancelar", use_container_width=True):
+                    st.session_state.song_picker_open = False
+                    st.rerun()
+            with c2:
+                st.button("Adicionar (0)", disabled=True, use_container_width=True)
+            return
+
+        # Limite para não pesar muito se o banco for gigante
+        MAX_SHOW = 250
+        show_labels = labels[:MAX_SHOW]
+        if len(labels) > MAX_SHOW:
+            st.caption(f"Mostrando {MAX_SHOW} de {len(labels)} resultados. Refine a busca para ver menos itens.")
+
+        st.markdown("---")
+
+        # Área rolável (via container + CSS simples)
+        st.markdown(
+            """
+            <style>
+            .song-picker-box {
+                max-height: 58vh;
+                overflow: auto;
+                padding-right: 8px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="song-picker-box">', unsafe_allow_html=True)
+
+        # Checkboxes
+        selected_count = 0
+        for lb in show_labels:
+            row_idx = idx_map[lb]
+            key = f"song_pick_chk_{b_idx}_{row_idx}"
+            # default: mantém valor anterior se já existir
+            val = st.checkbox(lb, key=key)
+            if val:
+                selected_count += 1
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # Botões de ação
+        col_a, col_b, col_c = st.columns([1, 1, 2])
+
+        with col_a:
+            if st.button("Desmarcar tudo", use_container_width=True):
+                # desmarca só os que estão aparecendo (filtrados)
+                for lb in show_labels:
+                    row_idx = idx_map[lb]
+                    key = f"song_pick_chk_{b_idx}_{row_idx}"
+                    st.session_state[key] = False
+                st.rerun()
+
+        with col_b:
+            if st.button("Marcar tudo (filtrado)", use_container_width=True):
+                for lb in show_labels:
+                    row_idx = idx_map[lb]
+                    key = f"song_pick_chk_{b_idx}_{row_idx}"
+                    st.session_state[key] = True
+                st.rerun()
+
+        with col_c:
+            c1, c2 = st.columns(2)
+
+            with c1:
+                if st.button("Cancelar", use_container_width=True):
+                    st.session_state.song_picker_open = False
+                    st.rerun()
+
+            with c2:
+                if st.button(f"Adicionar ({selected_count})", type="primary", use_container_width=True):
+                    # lê todos os checkboxes (do filtrado mostrado)
+                    chosen_row_idxs = []
+                    for lb in show_labels:
+                        row_idx = idx_map[lb]
+                        key = f"song_pick_chk_{b_idx}_{row_idx}"
+                        if st.session_state.get(key, False):
+                            chosen_row_idxs.append(row_idx)
+
+                    # adiciona no bloco
+                    block = st.session_state.blocks[b_idx]
+                    for row_idx in chosen_row_idxs:
+                        row = df_local.iloc[row_idx]
+
+                        cifra_id = str(row.get("CifraDriveID", "")).strip()
+                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
+
+                        new_item = {
+                            "type": "music",
+                            "title": row.get("Título", ""),
+                            "artist": row.get("Artista", ""),
+                            "tom_original": row.get("Tom_Original", ""),
+                            "tom": row.get("Tom_Original", ""),
+                            "bpm": row.get("BPM", ""),
+                            "cifra_id": cifra_id,
+                            "cifra_simplificada_id": cifra_simplificada_id,
+                            "use_simplificada": False,
+                            "text": "",
+                            # se você quiser já criar campos novos:
+                            "obs": "",
+                            "preparacao": "",
+                        }
+
+                        block["items"].append(new_item)
+
+                    # fecha modal
+                    st.session_state.song_picker_open = False
+                    st.success(f"Adicionadas: {len(chosen_row_idxs)}")
+                    st.rerun()
+
+    _dialog()
+    
 # ==============================================================
 # 11) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + BPM/Tom visíveis
 # ==============================================================
@@ -917,6 +1084,14 @@ def render_setlist_editor_tree():
 
             st.markdown("---")
 
+            # ----------------------------------------------------------
+            # MODAL: abre fora do loop, para não duplicar na tela
+            # ----------------------------------------------------------
+if st.session_state.get("song_picker_open", False):
+    target_b = st.session_state.get("song_picker_block_idx", None)
+    if target_b is not None and 0 <= target_b < len(st.session_state.blocks):
+        open_song_picker_dialog(target_b, st.session_state.songs_df)
+        
             # ==========================================================
             # ITENS DO BLOCO (✅ BPM/Tom sempre visíveis na linha)
             # ==========================================================
@@ -976,75 +1151,16 @@ def render_setlist_editor_tree():
             # ADD MÚSICA / PAUSA
             # ==========================================================
             col_add_mus, col_add_pause = st.columns(2)
-            if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}"):
-                st.session_state[f"show_add_music_block_{b_idx}"] = True
-            if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}"):
-                block["items"].append({"type": "pause", "label": "Pausa"})
-                st.rerun()
 
-            # ==========================================================
-            # ADD MÚSICA (mobile-safe selectbox)
-            # ==========================================================
-            if st.session_state.get(f"show_add_music_block_{b_idx}", False):
-                st.markdown("##### Adicionar músicas deste bloco")
+if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}", use_container_width=True):
+    st.session_state.song_picker_open = True
+    st.session_state.song_picker_block_idx = b_idx
+    st.rerun()
 
-                options = []
-                idx_map = {}
-
-                df_local = songs_df.reset_index(drop=True).copy()
-                for idx, row in df_local.iterrows():
-                    titulo = str(row.get("Título", "")).strip()
-                    artista = str(row.get("Artista", "")).strip()
-                    tom = str(row.get("Tom_Original", "")).strip()
-
-                    if not titulo:
-                        continue
-
-                    label_opt = f"{titulo} – {artista}" if artista else titulo
-                    if tom:
-                        label_opt += f" ({tom})"
-
-                    options.append(label_opt)
-                    idx_map[label_opt] = int(idx)
-
-                if not options:
-                    st.warning("Banco de músicas vazio (ou coluna 'Título' está vazia).")
-                    st.caption("Dica: confira se o CSV tem a coluna Título/Titulo e se há linhas preenchidas.")
-                else:
-                    selected_label = st.selectbox(
-                        "Escolha uma música",
-                        options=options,
-                        key=f"song_pick_{b_idx}",
-                    )
-
-                    ca, cb = st.columns(2)
-                    if ca.button("Adicionar", key=f"confirm_add_one_{b_idx}"):
-                        row = df_local.iloc[idx_map[selected_label]]
-
-                        cifra_id = str(row.get("CifraDriveID", "")).strip()
-                        cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
-
-                        new_item = {
-                            "type": "music",
-                            "title": row.get("Título", ""),
-                            "artist": row.get("Artista", ""),
-                            "tom_original": row.get("Tom_Original", ""),
-                            "tom": row.get("Tom_Original", ""),
-                            "bpm": row.get("BPM", ""),
-                            "cifra_id": cifra_id,
-                            "cifra_simplificada_id": cifra_simplificada_id,
-                            "use_simplificada": False,
-                            "text": "",
-                        }
-                        block["items"].append(new_item)
-                        st.session_state[f"show_add_music_block_{b_idx}"] = False
-                        st.rerun()
-
-                    if cb.button("Fechar", key=f"close_add_music_{b_idx}"):
-                        st.session_state[f"show_add_music_block_{b_idx}"] = False
-                        st.rerun()
-
-    # Editor do item selecionado (fora do loop)
+if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}", use_container_width=True):
+    block["items"].append({"type": "pause", "label": "Pausa"})
+    st.rerun()
+         
     render_selected_item_editor()
 
 

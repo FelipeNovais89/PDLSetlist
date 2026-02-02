@@ -879,7 +879,153 @@ def render_selected_item_editor():
 # ==============================================================
 # 11) MODAL — Song Picker (popup com busca + checkbox + scroll SÓ na lista)
 # ==============================================================
+# ==============================================================
+# 11.5) MODAL — Song Picker (popup com busca + checkbox + scroll SÓ na lista)
+# ==============================================================
 
+def open_song_picker_dialog(block_idx: int, songs_df: pd.DataFrame):
+    # ---- estado local do modal ----
+    if "song_picker_selected" not in st.session_state:
+        st.session_state.song_picker_selected = set()
+    if "song_picker_query" not in st.session_state:
+        st.session_state.song_picker_query = ""
+
+    @st.dialog("Adicionar músicas ao bloco", width="small")
+    def _dialog():
+        st.caption("Marque as músicas que deseja adicionar neste bloco.")
+
+        # 🔎 Busca
+        st.session_state.song_picker_query = st.text_input(
+            "Buscar",
+            value=st.session_state.song_picker_query,
+            placeholder="Digite parte do título ou artista…",
+            key="song_picker_search_input",
+        ).strip()
+
+        # CSS: scroll APENAS na lista
+        st.markdown(
+            """
+            <style>
+            /* Não mexe no modal inteiro. Só na caixa da lista */
+            .song-list-box{
+                max-height: 42vh;          /* altura da área rolável */
+                overflow-y: auto;          /* scroll só aqui */
+                padding: 10px 10px 6px 10px;
+                border: 1px solid rgba(255,255,255,0.10);
+                border-radius: 12px;
+                background: rgba(255,255,255,0.02);
+            }
+            /* deixa os checkboxes mais compactos */
+            div[data-testid="stCheckbox"]{
+                margin-bottom: -6px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Filtra dataframe
+        df = songs_df.copy()
+        df["Título"] = df["Título"].astype(str)
+        df["Artista"] = df["Artista"].astype(str)
+
+        q = st.session_state.song_picker_query.lower()
+        if q:
+            df = df[
+                df["Título"].str.lower().str.contains(q, na=False)
+                | df["Artista"].str.lower().str.contains(q, na=False)
+            ]
+
+        df = df.reset_index(drop=True)
+
+        # (Opcional) limitar render pra ficar leve
+        MAX_SHOW = 250
+        total = len(df)
+        if total > MAX_SHOW:
+            st.info(f"Mostrando {MAX_SHOW} de {total} músicas. Use a busca para refinar.")
+            df = df.head(MAX_SHOW)
+
+        # ---------- LISTA ROLÁVEL (somente aqui) ----------
+        st.markdown('<div class="song-list-box">', unsafe_allow_html=True)
+
+        for idx, row in df.iterrows():
+            titulo = (row.get("Título", "") or "").strip()
+            artista = (row.get("Artista", "") or "").strip()
+            tom = (row.get("Tom_Original", "") or "").strip()
+
+            if not titulo:
+                continue
+
+            label = f"{titulo} – {artista}" if artista else titulo
+            if tom:
+                label += f" ({tom})"
+
+            # ✅ id estável por música (melhor que idx do df)
+            song_id = f"{titulo}||{artista}"
+
+            # ✅ KEY ÚNICA por música + por bloco (evita DuplicateElementKey)
+            key = f"song_pick_cb__b{block_idx}__{abs(hash(song_id))}"
+
+            checked = song_id in st.session_state.song_picker_selected
+            val = st.checkbox(label, value=checked, key=key)
+
+            if val:
+                st.session_state.song_picker_selected.add(song_id)
+            else:
+                st.session_state.song_picker_selected.discard(song_id)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        # ---------- FIM LISTA ROLÁVEL ----------
+
+        st.markdown("---")
+
+        # Botões fixos (fora da lista rolável)
+        c1, c2, c3 = st.columns([1.2, 1, 1.4])
+
+        if c1.button("Limpar seleção", use_container_width=True, key=f"song_pick_clear__b{block_idx}"):
+            st.session_state.song_picker_selected = set()
+            st.rerun()
+
+        if c2.button("Cancelar", use_container_width=True, key=f"song_pick_cancel__b{block_idx}"):
+            st.session_state.song_picker_open = False
+            st.session_state.song_picker_block_idx = None
+            st.rerun()
+
+        if c3.button("Adicionar selecionadas", use_container_width=True, key=f"song_pick_add__b{block_idx}"):
+            # Monta mapa rápido do banco (por song_id)
+            # Observação: se tiver músicas repetidas (mesmo título/artista), isso vira ambíguo.
+            # Se acontecer, a gente adiciona também BPM+Tom no song_id.
+            bank = {}
+            for _, r in songs_df.iterrows():
+                t = str(r.get("Título", "") or "").strip()
+                a = str(r.get("Artista", "") or "").strip()
+                sid = f"{t}||{a}"
+                bank[sid] = r
+
+            target_block = st.session_state.blocks[block_idx]
+            added = 0
+
+            for sid in list(st.session_state.song_picker_selected):
+                if sid not in bank:
+                    continue
+                r = bank[sid]
+
+                cifra_id = str(r.get("CifraDriveID", "") or "").strip()
+                cifra_simplificada_id = str(r.get("CifraSimplificadaID", "") or "").strip()
+
+                new_item = {
+                    "type": "music",
+                    "title": r.get("Título", ""),
+                    "artist": r.get("Artista", ""),
+                    "tom_original": r.get("Tom_Original", ""),
+                    "tom": r.get("Tom_Original", ""),
+                    "bpm": r.get("BPM", ""),
+                    "cifra_id": cifra_id,
+                    "cifra_simplificada_id": cifra_simplificada_id,
+                    "use_simplificada": False,
+                    "text": "",
+                    # se você já usa obs/preparacao por música:
+                    "obs": "",
                     "preparacao": "",
                 }
                 target_block["items"].append(new_item)

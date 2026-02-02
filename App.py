@@ -877,7 +877,7 @@ def render_selected_item_editor():
         )
 
 # ==============================================================
-# 11.X) POPUP (MODAL) - SELETOR DE MÚSICAS DO BANCO (CHECKBOX)
+# 11) POPUP (MODAL) - SELETOR DE MÚSICAS DO BANCO (CHECKBOX)
 # ==============================================================
 
 def open_song_picker_dialog(b_idx: int, songs_df: pd.DataFrame):
@@ -1045,7 +1045,7 @@ def open_song_picker_dialog(b_idx: int, songs_df: pd.DataFrame):
     _dialog()
     
 # ==============================================================
-# 11) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + BPM/Tom visíveis
+# 11.5) EDITOR EM ÁRVORE (SETLIST) — ✅ versão única + BPM/Tom visíveis
 # ==============================================================
 
 def render_setlist_editor_tree():
@@ -1058,6 +1058,9 @@ def render_setlist_editor_tree():
         st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
         st.rerun()
 
+    # ==========================================================
+    # LOOP DE BLOCOS
+    # ==========================================================
     for b_idx, block in enumerate(blocks):
         with st.expander(
             f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}",
@@ -1084,14 +1087,6 @@ def render_setlist_editor_tree():
 
             st.markdown("---")
 
-            # ----------------------------------------------------------
-            # MODAL: abre fora do loop, para não duplicar na tela
-            # ----------------------------------------------------------
-if st.session_state.get("song_picker_open", False):
-    target_b = st.session_state.get("song_picker_block_idx", None)
-    if target_b is not None and 0 <= target_b < len(st.session_state.blocks):
-        open_song_picker_dialog(target_b, st.session_state.songs_df)
-        
             # ==========================================================
             # ITENS DO BLOCO (✅ BPM/Tom sempre visíveis na linha)
             # ==========================================================
@@ -1115,10 +1110,7 @@ if st.session_state.get("song_picker_open", False):
                     if bpm:
                         meta.append(f"BPM: {bpm}")
 
-                    if meta:
-                        label = label_main + "  ·  " + " | ".join(meta)
-                    else:
-                        label = label_main
+                    label = label_main + ("  ·  " + " | ".join(meta) if meta else "")
 
                 else:
                     label = f"⏸ {item.get('label', 'Pausa')}"
@@ -1152,18 +1144,34 @@ if st.session_state.get("song_picker_open", False):
             # ==========================================================
             col_add_mus, col_add_pause = st.columns(2)
 
-if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}", use_container_width=True):
-    st.session_state.song_picker_open = True
-    st.session_state.song_picker_block_idx = b_idx
-    st.rerun()
+            if col_add_mus.button(
+                "Música do banco",
+                key=f"add_mus_blk_{b_idx}",
+                use_container_width=True
+            ):
+                st.session_state.song_picker_open = True
+                st.session_state.song_picker_block_idx = b_idx
+                st.rerun()
 
-if col_add_pause.button("Pausa", key=f"add_pause_blk_{b_idx}", use_container_width=True):
-    block["items"].append({"type": "pause", "label": "Pausa"})
-    st.rerun()
-         
+            if col_add_pause.button(
+                "Pausa",
+                key=f"add_pause_blk_{b_idx}",
+                use_container_width=True
+            ):
+                block["items"].append({"type": "pause", "label": "Pausa"})
+                st.rerun()
+
+    # ==========================================================
+    # MODAL: abre fora do loop (pra não duplicar e não quebrar)
+    # ==========================================================
+    if st.session_state.get("song_picker_open", False):
+        target_b = st.session_state.get("song_picker_block_idx", None)
+        if target_b is not None and 0 <= target_b < len(st.session_state.blocks):
+            open_song_picker_dialog(target_b, st.session_state.songs_df)
+
+    # Editor do item selecionado (fora do loop)
     render_selected_item_editor()
-
-
+    
 # ==============================================================
 # 12) BANCO DE MÚSICAS (GitHub CSV) + GERAR TXT NO DRIVE
 # ==============================================================

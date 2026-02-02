@@ -898,7 +898,7 @@ def open_song_picker_dialog(target_block_idx: int, songs_df: pd.DataFrame):
     """
 
     # ===== dialog dentro da função (Streamlit) =====
-    @st.dialog("Adicionar músicas ao bloco", width="large")
+    @st.dialog("Adicionar músicas ao bloco", width="small")
     def _dialog():
         st.caption("Marque as músicas que deseja adicionar neste bloco.")
 
@@ -931,19 +931,25 @@ def open_song_picker_dialog(target_block_idx: int, songs_df: pd.DataFrame):
 
         # --- área de seleção (scroll) ---
         st.markdown(
-            """
-            <style>
-            .song-picker-box {
-                max-height: 55vh;
-                overflow-y: auto;
-                padding-right: 6px;
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 10px;
-                padding: 10px;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
+    """
+    <style>
+    .song-picker-box {
+        max-height: 38vh;           /* ✅ menor: lista ocupa menos tela */
+        overflow-y: auto;           /* ✅ barra de rolagem */
+        padding-right: 8px;
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,0.02);
+    }
+
+    /* deixa os checkboxes mais “juntos” (menos espaço) */
+    div[data-testid="stCheckbox"] {
+        margin-bottom: -6px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
         )
 
         # guarda seleção em session_state

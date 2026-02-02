@@ -934,12 +934,12 @@ def open_song_picker_dialog(target_block_idx: int, songs_df: pd.DataFrame):
     """
     <style>
     .song-picker-box {
-        max-height: 38vh;           /* ✅ menor: lista ocupa menos tela */
+        max-height: 25vh;           /* ✅ menor: lista ocupa menos tela */
         overflow-y: auto;           /* ✅ barra de rolagem */
-        padding-right: 8px;
+        padding-right: 5px;
         border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 12px;
-        padding: 10px;
+        border-radius: 5px;
+        padding: 5px;
         background: rgba(255,255,255,0.02);
     }
 

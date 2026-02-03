@@ -1281,70 +1281,105 @@ def render_song_database():
                 )
                 
 # ==============================================================
-# 12.5) DEBUG GEMINI (painel de teste isolado)
+# 12.5) DEBUG GEMINI (painel de teste isolado) — COM LISTAGEM
 # ==============================================================
+
+def _normalize_model_name(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        return ""
+    # aceita "gemini-1.5-pro" e "models/gemini-1.5-pro"
+    if not name.startswith("models/"):
+        name = "models/" + name
+    return name
+
 
 def render_gemini_debug():
     st.markdown("---")
     st.subheader("🧪 Diagnóstico Gemini AI")
 
-    # ---------------------------------
-    # Status básico
-    # ---------------------------------
     st.markdown("### Status do ambiente")
-
-    st.write("google-generativeai importado:",
-             "✅" if genai is not None else "❌")
+    st.write("google-generativeai importado:", "✅" if genai is not None else "❌")
 
     api_key = get_gemini_api_key()
+    st.write("API key encontrada:", "✅" if api_key else "❌")
 
-    st.write("API key encontrada:",
-             "✅" if api_key else "❌")
-
-    if not genai:
+    if genai is None:
         st.error("Biblioteca google-generativeai NÃO carregou. Verifique requirements.txt")
         return
-
     if not api_key:
         st.error("gemini_api_key NÃO encontrado no st.secrets")
         return
 
-    # ---------------------------------
-    # Teste simples de texto
-    # ---------------------------------
-    st.markdown("### Teste simples (texto → texto)")
+    # configura uma vez aqui
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        st.error("Falha ao configurar API key:")
+        st.exception(e)
+        return
 
-    model_name = st.text_input(
-        "Modelo",
-        value="gemini-1.5-flash",
-        help="Teste: gemini-1.5-flash ou gemini-1.5-pro"
-    )
+    st.markdown("### Modelos disponíveis (ListModels)")
 
-    if st.button("Testar conexão"):
+    if st.button("🔎 Listar modelos disponíveis"):
         try:
-            genai.configure(api_key=api_key)
+            models = list(genai.list_models())
 
+            # guarda em session_state para não chamar sempre
+            st.session_state._gemini_models = models
+
+            st.success(f"Modelos encontrados: {len(models)}")
+        except Exception as e:
+            st.error("Erro ao listar modelos:")
+            st.exception(e)
+            return
+
+    models = st.session_state.get("_gemini_models", [])
+
+    # filtra os que suportam generateContent
+    usable = []
+    for m in models:
+        name = getattr(m, "name", "")
+        methods = getattr(m, "supported_generation_methods", []) or []
+        if "generateContent" in methods:
+            usable.append(name)
+
+    if usable:
+        usable_sorted = sorted(usable)
+        picked = st.selectbox(
+            "Escolha um modelo compatível (generateContent)",
+            options=usable_sorted,
+            index=0,
+            key="gemini_model_picker",
+        )
+        st.session_state.gemini_model_ok = picked
+        st.caption(f"Selecionado: {picked}")
+    else:
+        st.info("Clique em 'Listar modelos disponíveis' para carregar a lista.")
+        picked = st.text_input(
+            "Ou digite manualmente o modelo (ex: models/gemini-1.0-pro)",
+            value=st.session_state.get("gemini_model_ok", "models/gemini-1.0-pro"),
+        )
+        st.session_state.gemini_model_ok = _normalize_model_name(picked)
+
+    st.markdown("### Teste simples (texto → texto)")
+    if st.button("✅ Testar conexão"):
+        try:
+            model_name = st.session_state.get("gemini_model_ok", "")
             model = genai.GenerativeModel(model_name)
             resp = model.generate_content("Responda apenas: OK")
-
             st.success("Conexão OK ✅")
             st.write("Resposta:", getattr(resp, "text", resp))
-
         except Exception as e:
             st.error("Erro real do Gemini:")
             st.exception(e)
 
-    # ---------------------------------
-    # Teste de imagem (transcrição)
-    # ---------------------------------
     st.markdown("### Teste de imagem (OCR cifra)")
+    file = st.file_uploader("Envie uma imagem", type=["jpg", "jpeg", "png"], key="gemini_dbg_img")
 
-    file = st.file_uploader("Envie uma imagem", type=["jpg", "jpeg", "png"])
-
-    if file and st.button("Transcrever imagem"):
+    if file and st.button("🧾 Transcrever imagem"):
         try:
-            genai.configure(api_key=api_key)
-
+            model_name = st.session_state.get("gemini_model_ok", "")
             model = genai.GenerativeModel(model_name)
 
             prompt = "Transcreva todo o texto da imagem exatamente como está."
@@ -1353,15 +1388,14 @@ def render_gemini_debug():
                 [prompt, {"mime_type": file.type, "data": file.getvalue()}]
             )
 
-            text = getattr(response, "text", "")
-
+            text = getattr(response, "text", "") or ""
             st.success("Texto retornado:")
             st.text_area("Resultado", text, height=300)
 
         except Exception as e:
             st.error("Erro real da transcrição:")
             st.exception(e)
-            
+
 # ==============================================================
 # 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================

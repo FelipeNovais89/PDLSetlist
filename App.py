@@ -1281,120 +1281,188 @@ def render_song_database():
                 )
                 
 # ==============================================================
-# 12.5) DEBUG GEMINI (painel de teste isolado) — COM LISTAGEM
+# 12.5) GEMINI AI — OCR CIFRA (imagem → texto)
 # ==============================================================
 
-def _normalize_model_name(name: str) -> str:
-    name = (name or "").strip()
-    if not name:
-        return ""
-    # aceita "gemini-1.5-pro" e "models/gemini-1.5-pro"
-    if not name.startswith("models/"):
-        name = "models/" + name
-    return name
+import google.generativeai as genai
+import re
+import base64
 
 
-def render_gemini_debug():
-    st.markdown("---")
-    st.subheader("🧪 Diagnóstico Gemini AI")
+# --------------------------------------------------------------
+# 🔧 Corrige linhas de acordes automaticamente (prefixa "| ")
+# --------------------------------------------------------------
+def _fix_chord_lines(text: str) -> str:
+    lines = text.splitlines()
+    out = []
 
-    st.markdown("### Status do ambiente")
-    st.write("google-generativeai importado:", "✅" if genai is not None else "❌")
+    chord_pattern = re.compile(
+        r'^([A-G][#b]?(m|maj|min|sus|dim|aug|add|\d+)?(\([^\)]*\))?\s+)+$'
+    )
 
-    api_key = get_gemini_api_key()
-    st.write("API key encontrada:", "✅" if api_key else "❌")
+    for line in lines:
+        stripped = line.strip()
 
-    if genai is None:
-        st.error("Biblioteca google-generativeai NÃO carregou. Verifique requirements.txt")
-        return
-    if not api_key:
-        st.error("gemini_api_key NÃO encontrado no st.secrets")
-        return
+        if chord_pattern.match(stripped):
+            if not stripped.startswith("|"):
+                line = "| " + line
 
-    # configura uma vez aqui
+        out.append(line)
+
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------
+# 🔮 Prompt otimizado para cifras
+# --------------------------------------------------------------
+GEMINI_PROMPT = """
+Transcreva a cifra musical presente na imagem.
+
+REGRAS OBRIGATÓRIAS:
+- NÃO explique nada
+- NÃO comente nada
+- NÃO traduza
+- NÃO adicione texto extra
+- Retorne SOMENTE a cifra
+
+FORMATAÇÃO:
+- Preserve quebras de linha
+- Preserve espaçamento
+- Letras normais NÃO devem ter prefixo
+- Linhas contendo acordes devem começar com "| "
+
+EXEMPLO:
+| C        G        Am
+Hoje eu vou cantar
+"""
+
+
+# --------------------------------------------------------------
+# 🔎 Lista modelos compatíveis automaticamente
+# --------------------------------------------------------------
+def _list_models():
     try:
-        genai.configure(api_key=api_key)
+        models = genai.list_models()
+        usable = []
+
+        for m in models:
+            if "generateContent" in m.supported_generation_methods:
+                usable.append(m.name)
+
+        usable.sort()
+        return usable
+
     except Exception as e:
-        st.error("Falha ao configurar API key:")
-        st.exception(e)
+        return [f"Erro: {e}"]
+
+
+# --------------------------------------------------------------
+# 🎯 Transcrição principal
+# --------------------------------------------------------------
+def _transcribe_image(image_bytes: bytes, model_name: str):
+
+    model = genai.GenerativeModel(model_name)
+
+    resp = model.generate_content(
+        [
+            GEMINI_PROMPT,
+            {"mime_type": "image/jpeg", "data": image_bytes}
+        ]
+    )
+
+    return _fix_chord_lines(resp.text)
+
+
+# --------------------------------------------------------------
+# 🖥️ UI Streamlit
+# --------------------------------------------------------------
+def render_gemini_ocr_section():
+
+    st.markdown("## 🧠 Gemini AI — OCR de Cifras")
+
+    # -------------------------
+    # configuração API
+    # -------------------------
+    api_key = st.secrets.get("gemini_api_key")
+
+    if not api_key:
+        st.error("❌ gemini_api_key não encontrada no st.secrets")
         return
 
-    st.markdown("### Modelos disponíveis (ListModels)")
+    genai.configure(api_key=api_key)
 
-    if st.button("🔎 Listar modelos disponíveis"):
-        try:
-            models = list(genai.list_models())
-
-            # guarda em session_state para não chamar sempre
-            st.session_state._gemini_models = models
-
-            st.success(f"Modelos encontrados: {len(models)}")
-        except Exception as e:
-            st.error("Erro ao listar modelos:")
-            st.exception(e)
-            return
+    # -------------------------
+    # modelos
+    # -------------------------
+    if st.button("🔍 Listar modelos disponíveis"):
+        st.session_state._gemini_models = _list_models()
 
     models = st.session_state.get("_gemini_models", [])
 
-    # filtra os que suportam generateContent
-    usable = []
-    for m in models:
-        name = getattr(m, "name", "")
-        methods = getattr(m, "supported_generation_methods", []) or []
-        if "generateContent" in methods:
-            usable.append(name)
+    if models:
+        st.success(f"Modelos encontrados: {len(models)}")
 
-    if usable:
-        usable_sorted = sorted(usable)
-        picked = st.selectbox(
-            "Escolha um modelo compatível (generateContent)",
-            options=usable_sorted,
-            index=0,
-            key="gemini_model_picker",
+    default_model = "models/gemini-2.0-flash"
+
+    model_name = st.selectbox(
+        "Escolha o modelo",
+        options=models if models else [default_model],
+        index=0
+    )
+
+    st.info("💡 Recomendado: models/gemini-2.0-flash")
+
+    # -------------------------
+    # upload imagem
+    # -------------------------
+    file = st.file_uploader(
+        "Envie imagem da cifra",
+        type=["jpg", "jpeg", "png"]
+    )
+
+    if not file:
+        return
+
+    image_bytes = file.read()
+
+    st.image(image_bytes, caption="Pré-visualização", use_column_width=True)
+
+    # -------------------------
+    # transcrever
+    # -------------------------
+    if st.button("🚀 Transcrever cifra"):
+
+        with st.spinner("Gemini analisando..."):
+            try:
+                text = _transcribe_image(image_bytes, model_name)
+
+                st.session_state._gemini_result = text
+
+            except Exception as e:
+                st.error(f"Erro Gemini:\n\n{e}")
+                return
+
+    # -------------------------
+    # resultado
+    # -------------------------
+    result = st.session_state.get("_gemini_result")
+
+    if result:
+
+        st.markdown("### 📄 Resultado")
+
+        st.text_area(
+            "Cifra transcrita",
+            result,
+            height=350
         )
-        st.session_state.gemini_model_ok = picked
-        st.caption(f"Selecionado: {picked}")
-    else:
-        st.info("Clique em 'Listar modelos disponíveis' para carregar a lista.")
-        picked = st.text_input(
-            "Ou digite manualmente o modelo (ex: models/gemini-1.0-pro)",
-            value=st.session_state.get("gemini_model_ok", "models/gemini-1.0-pro"),
+
+        st.download_button(
+            "💾 Baixar TXT",
+            result,
+            file_name="cifra.txt"
         )
-        st.session_state.gemini_model_ok = _normalize_model_name(picked)
 
-    st.markdown("### Teste simples (texto → texto)")
-    if st.button("✅ Testar conexão"):
-        try:
-            model_name = st.session_state.get("gemini_model_ok", "")
-            model = genai.GenerativeModel(model_name)
-            resp = model.generate_content("Responda apenas: OK")
-            st.success("Conexão OK ✅")
-            st.write("Resposta:", getattr(resp, "text", resp))
-        except Exception as e:
-            st.error("Erro real do Gemini:")
-            st.exception(e)
-
-    st.markdown("### Teste de imagem (OCR cifra)")
-    file = st.file_uploader("Envie uma imagem", type=["jpg", "jpeg", "png"], key="gemini_dbg_img")
-
-    if file and st.button("🧾 Transcrever imagem"):
-        try:
-            model_name = st.session_state.get("gemini_model_ok", "")
-            model = genai.GenerativeModel(model_name)
-
-            prompt = "Transcreva todo o texto da imagem exatamente como está."
-
-            response = model.generate_content(
-                [prompt, {"mime_type": file.type, "data": file.getvalue()}]
-            )
-
-            text = getattr(response, "text", "") or ""
-            st.success("Texto retornado:")
-            st.text_area("Resultado", text, height=300)
-
-        except Exception as e:
-            st.error("Erro real da transcrição:")
-            st.exception(e)
 
 # ==============================================================
 # 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
@@ -2079,7 +2147,7 @@ def main():
         st.markdown("---")
         render_song_database()
 
-        render_gemini_debug()
+        render_gemini_ocr_section()
 
     # ==========================================================
     # COLUNA DIREITA — PREVIEW (COM FULLSCREEN SLIDES)

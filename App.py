@@ -1279,7 +1279,89 @@ def render_song_database():
                     f"- CifraSimplificadaID: {final_simpl_id}\n\n"
                     f"(Tom_Original: {tom_original} | BPM: {bpm})"
                 )
+                
+# ==============================================================
+# 12.5) DEBUG GEMINI (painel de teste isolado)
+# ==============================================================
 
+def render_gemini_debug():
+    st.markdown("---")
+    st.subheader("🧪 Diagnóstico Gemini AI")
+
+    # ---------------------------------
+    # Status básico
+    # ---------------------------------
+    st.markdown("### Status do ambiente")
+
+    st.write("google-generativeai importado:",
+             "✅" if genai is not None else "❌")
+
+    api_key = get_gemini_api_key()
+
+    st.write("API key encontrada:",
+             "✅" if api_key else "❌")
+
+    if not genai:
+        st.error("Biblioteca google-generativeai NÃO carregou. Verifique requirements.txt")
+        return
+
+    if not api_key:
+        st.error("gemini_api_key NÃO encontrado no st.secrets")
+        return
+
+    # ---------------------------------
+    # Teste simples de texto
+    # ---------------------------------
+    st.markdown("### Teste simples (texto → texto)")
+
+    model_name = st.text_input(
+        "Modelo",
+        value="gemini-1.5-flash",
+        help="Teste: gemini-1.5-flash ou gemini-1.5-pro"
+    )
+
+    if st.button("Testar conexão"):
+        try:
+            genai.configure(api_key=api_key)
+
+            model = genai.GenerativeModel(model_name)
+            resp = model.generate_content("Responda apenas: OK")
+
+            st.success("Conexão OK ✅")
+            st.write("Resposta:", getattr(resp, "text", resp))
+
+        except Exception as e:
+            st.error("Erro real do Gemini:")
+            st.exception(e)
+
+    # ---------------------------------
+    # Teste de imagem (transcrição)
+    # ---------------------------------
+    st.markdown("### Teste de imagem (OCR cifra)")
+
+    file = st.file_uploader("Envie uma imagem", type=["jpg", "jpeg", "png"])
+
+    if file and st.button("Transcrever imagem"):
+        try:
+            genai.configure(api_key=api_key)
+
+            model = genai.GenerativeModel(model_name)
+
+            prompt = "Transcreva todo o texto da imagem exatamente como está."
+
+            response = model.generate_content(
+                [prompt, {"mime_type": file.type, "data": file.getvalue()}]
+            )
+
+            text = getattr(response, "text", "")
+
+            st.success("Texto retornado:")
+            st.text_area("Resultado", text, height=300)
+
+        except Exception as e:
+            st.error("Erro real da transcrição:")
+            st.exception(e)
+            
 # ==============================================================
 # 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================
@@ -1962,6 +2044,8 @@ def main():
 
         st.markdown("---")
         render_song_database()
+
+        render_gemini_debug()
 
     # ==========================================================
     # COLUNA DIREITA — PREVIEW (COM FULLSCREEN SLIDES)

@@ -1510,6 +1510,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     else:
         cifra_txt = item.get("text", "")
 
+    # ✅ AQUI: transpõe para o TOM atual do item
+    tom_atual = (item.get("tom") or "").strip()
+    tom_original = (item.get("tom_original") or tom_atual).strip()
+
+    if cifra_txt and tom_original and tom_atual and tom_original != tom_atual:
+        cifra_txt = transpose_chord_text(cifra_txt, tom_original, tom_atual)
+
+    # só depois remove o "|" para exibição
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
     # ========= próxima =========

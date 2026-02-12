@@ -1485,7 +1485,7 @@ def render_gemini_ocr_section():
     result = st.session_state.get("_gemini_result")
 
     if result:
-    st.markdown("### 📄 Resultado")
+       st.markdown("### 📄 Resultado")
 
     # CSS: mira exatamente o textarea pelo label (aria-label)
     st.markdown("""

@@ -1485,42 +1485,41 @@ def render_gemini_ocr_section():
     result = st.session_state.get("_gemini_result")
 
     if result:
-
         st.markdown("### 📄 Resultado")
 
         # ===== CSS igual PREVIEW =====
-st.markdown("""
-<style>
+        st.markdown("""
+        <style>
+        /* força o textarea do OCR usar a MESMA fonte do preview */
+        .pdl-ocr textarea {
+            font-family: "Courier New", monospace !important;
 
-/* força o textarea do OCR usar a MESMA fonte do preview */
-.pdl-ocr textarea {
-    font-family: "Courier New", monospace !important;
+            /* auto-fit parecido com preview */
+            font-size: clamp(10px, 1.4vw, 14px) !important;
+            line-height: 1.25 !important;
 
-    /* auto-fit parecido com preview */
-    font-size: clamp(10px, 1.4vw, 14px) !important;
-    line-height: 1.25 !important;
+            /* comportamento igual preview */
+            white-space: pre !important;
+            overflow-x: auto !important;
+            overflow-y: auto !important;
 
-    /* comportamento igual preview */
-    white-space: pre !important;
-    overflow-x: auto !important;
-    overflow-y: auto !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
+            text-wrap: nowrap !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
-    word-break: normal !important;
-    overflow-wrap: normal !important;
-    text-wrap: nowrap !important;
-}
+        st.markdown('<div class="pdl-ocr">', unsafe_allow_html=True)
 
-</style>
-""", unsafe_allow_html=True)
+        st.text_area(
+            "Cifra transcrita",
+            result,
+            height=350,
+            key="ocr_result_textarea",
+        )
 
-st.markdown('<div class="pdl-ocr">', unsafe_allow_html=True)
-
-st.text_area(
-    "Cifra transcrita",
-    result,
-    height=350,
-    key="ocr_result_textarea"
-)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         st.download_button(
             "💾 Baixar TXT",

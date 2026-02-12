@@ -1522,8 +1522,6 @@ st.text_area(
     key="ocr_result_textarea"
 )
 
-st.markdown("</div>", unsafe_allow_html=True)
-
         st.download_button(
             "💾 Baixar TXT",
             result,

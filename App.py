@@ -810,11 +810,11 @@ def render_selected_item_editor():
   text-wrap: nowrap !important;
 
   /* tamanho automático */
-  font-size: clamp(10px, 1.6vw, 14px) !important;
+  font-size: clamp(4px, 1.6vw, 14px) !important;
   line-height: 1.25 !important;
 
   /* altura proporcional à tela */
-  height: 48vh !important;
+  height: 60vh !important;
   min-height: 220px !important;
 }
 </style>

@@ -799,8 +799,7 @@ def render_selected_item_editor():
 .pdl-cifra-editor textarea {
 
   /* mesma fonte do preview */
-  font-family: Georgia, "Times New Roman", Times, serif !important;
-
+  font-family: "Courier New", monospace;
   /* nunca quebrar linha */
   white-space: pre !important;
   overflow-x: auto !important;
@@ -1595,7 +1594,7 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   }}
 
   body {{
-      font-family: Arial, sans-serif;
+      font-family: "Courier New", monospace;
   }}
 
   /* ✅ wrapper do container */

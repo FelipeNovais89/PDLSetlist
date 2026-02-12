@@ -724,7 +724,7 @@ def load_setlist_into_state_from_github(setlist_name: str, songs_df: pd.DataFram
 
 
 # ==============================================================
-# 10) EDITOR DO ITEM SELECIONADO
+# 10) EDITOR DO ITEM SELECIONADO  — versão responsiva + fonte preview
 # ==============================================================
 
 def render_selected_item_editor():
@@ -750,13 +750,21 @@ def render_selected_item_editor():
     st.markdown("---")
     st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
 
+    # ==========================================================
+    # 🎵 MÚSICA
+    # ==========================================================
     if item.get("type") == "music":
+
         title = item.get("title", "Nova música")
         artist = item.get("artist", "")
+
         st.markdown(f"**🎵 {title}**")
         if artist:
             st.caption(artist)
 
+        # ------------------------------------------------------
+        # Alternar original / simplificada
+        # ------------------------------------------------------
         use_simplificada = item.get("use_simplificada", False)
         btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
 
@@ -768,7 +776,11 @@ def render_selected_item_editor():
         cifra_id = (item.get("cifra_id", "") or "").strip()
         cifra_simplificada_id = (item.get("cifra_simplificada_id", "") or "").strip()
 
+        # ======================================================
+        # ✨ EDITOR DE CIFRA (NOVO VISUAL)
+        # ======================================================
         with st.expander("Ver / editar cifra (texto)", expanded=True):
+
             if item.get("use_simplificada") and cifra_simplificada_id:
                 current_id = cifra_simplificada_id
             elif cifra_id:
@@ -778,34 +790,49 @@ def render_selected_item_editor():
 
             cifra_text = load_chord_from_drive(current_id) if current_id else item.get("text", "")
 
-            font_size = st.session_state.cifra_font_size
-            c1, c2 = st.columns(2)
-            if c1.button("A﹣", key=f"font_minus_sel_{b_idx}_{i_idx}"):
-                st.session_state.cifra_font_size = max(8, font_size - 1)
-                st.rerun()
-            if c2.button("A﹢", key=f"font_plus_sel_{b_idx}_{i_idx}"):
-                st.session_state.cifra_font_size = min(24, font_size + 1)
-                st.rerun()
+            # --------------------------------------------------
+            # CSS RESPONSIVO (igual preview)
+            # --------------------------------------------------
+            st.markdown(
+                """
+<style>
+.pdl-cifra-editor textarea {
+
+  /* mesma fonte do preview */
+  font-family: Georgia, "Times New Roman", Times, serif !important;
+
+  /* nunca quebrar linha */
+  white-space: pre !important;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  text-wrap: nowrap !important;
+
+  /* tamanho automático */
+  font-size: clamp(10px, 1.6vw, 14px) !important;
+  line-height: 1.25 !important;
+
+  /* altura proporcional à tela */
+  height: 48vh !important;
+  min-height: 220px !important;
+}
+</style>
+""",
+                unsafe_allow_html=True,
+            )
+
+            # wrapper para aplicar CSS só neste textarea
+            st.markdown('<div class="pdl-cifra-editor">', unsafe_allow_html=True)
 
             edited = st.text_area(
                 "Cifra",
                 value=cifra_text,
-                height=300,
                 key=f"cifra_edit_sel_{b_idx}_{i_idx}",
                 label_visibility="collapsed",
             )
 
-            st.markdown(
-                f"""
-                <style>
-                textarea[data-testid="stTextArea"] {{
-                    font-family: 'Courier New', monospace;
-                    font-size: {font_size}px;
-                }}
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.markdown("</div>", unsafe_allow_html=True)
 
             if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
                 if current_id:
@@ -813,9 +840,12 @@ def render_selected_item_editor():
                     st.success("Cifra atualizada no Drive.")
                 else:
                     item["text"] = edited
-                    st.success("Cifra salva apenas neste setlist (sem arquivo no Drive).")
+                    st.success("Cifra salva apenas neste setlist.")
                 st.rerun()
 
+        # ======================================================
+        # BPM + TOM
+        # ======================================================
         bpm_val = item.get("bpm", "")
         tom_original = item.get("tom_original", "") or item.get("tom", "")
         tom_val = item.get("tom", tom_original)
@@ -835,6 +865,7 @@ def render_selected_item_editor():
 
         if tom_val and tom_val not in tone_list:
             tone_list = [tom_val] + tone_list
+
         idx_tone = tone_list.index(tom_val) if tom_val in tone_list else 0
 
         selected_tone = col_tom.selectbox(
@@ -843,14 +874,15 @@ def render_selected_item_editor():
             index=idx_tone,
             key=f"tom_sel_{b_idx}_{i_idx}",
         )
+
         if selected_tone != tom_val:
             item["tom"] = selected_tone
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
 
-        # ==========================================================
-        # ✅ NOVO: OBS / PREPARAÇÃO (por música)
-        # ==========================================================
+        # ======================================================
+        # OBS / PREPARAÇÃO
+        # ======================================================
         st.markdown("---")
         st.markdown("#### Observações / Preparação")
 
@@ -868,13 +900,19 @@ def render_selected_item_editor():
             key=f"prep_sel_{b_idx}_{i_idx}",
         )
 
+    # ==========================================================
+    # ⏸ PAUSA
+    # ==========================================================
     else:
         st.markdown("**⏸ Pausa**")
+
         item["label"] = st.text_input(
             "Descrição da pausa",
             value=item.get("label", "Pausa"),
             key=f"pause_label_{b_idx}_{i_idx}",
         )
+
+        
 
 # ==============================================================
 # 11) MODAL — Song Picker (popup com busca + checkbox + scroll SÓ na lista)

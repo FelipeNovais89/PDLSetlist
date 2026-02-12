@@ -1485,47 +1485,41 @@ def render_gemini_ocr_section():
     result = st.session_state.get("_gemini_result")
 
     if result:
-        st.markdown("### 📄 Resultado")
+    st.markdown("### 📄 Resultado")
 
-        # ===== CSS igual PREVIEW =====
-        st.markdown("""
-        <style>
-        /* força o textarea do OCR usar a MESMA fonte do preview */
-        .pdl-ocr textarea {
-            font-family: "Courier New", monospace !important;
+    # CSS: mira exatamente o textarea pelo label (aria-label)
+    st.markdown("""
+    <style>
+      /* SOMENTE o textarea cujo label é "Cifra transcrita" */
+      textarea[aria-label="Cifra transcrita"]{
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                     "Liberation Mono", "Courier New", monospace !important;
 
-            /* auto-fit parecido com preview */
-            font-size: clamp(10px, 1.4vw, 14px) !important;
-            line-height: 1.25 !important;
+        font-size: clamp(10px, 1.4vw, 14px) !important;
+        line-height: 1.25 !important;
 
-            /* comportamento igual preview */
-            white-space: pre !important;
-            overflow-x: auto !important;
-            overflow-y: auto !important;
+        white-space: pre !important;      /* não “quebra” espaços */
+        overflow-x: auto !important;      /* scroll horizontal */
+        overflow-y: auto !important;
 
-            word-break: normal !important;
-            overflow-wrap: normal !important;
-            text-wrap: nowrap !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        overflow-wrap: normal !important;
+        word-break: normal !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
 
-        st.markdown('<div class="pdl-ocr">', unsafe_allow_html=True)
+    st.text_area(
+        "Cifra transcrita",
+        result,
+        height=350,
+        key="ocr_result_textarea",
+    )
 
-        st.text_area(
-            "Cifra transcrita",
-            result,
-            height=350,
-            key="ocr_result_textarea",
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.download_button(
-            "💾 Baixar TXT",
-            result,
-            file_name="cifra.txt"
-        )
+    st.download_button(
+        "💾 Baixar TXT",
+        result,
+        file_name="cifra.txt"
+    )
 
 
 # ==============================================================

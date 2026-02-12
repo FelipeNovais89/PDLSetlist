@@ -1492,8 +1492,7 @@ def render_gemini_ocr_section():
     <style>
       /* SOMENTE o textarea cujo label é "Cifra transcrita" */
       textarea[aria-label="Cifra transcrita"]{
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-                     "Liberation Mono", "Courier New", monospace !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
 
         font-size: clamp(10px, 1.4vw, 14px) !important;
         line-height: 1.25 !important;

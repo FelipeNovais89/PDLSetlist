@@ -1421,7 +1421,6 @@ def render_gemini_ocr_section():
     # configuração API
     # -------------------------
     api_key = st.secrets.get("gemini_api_key")
-
     if not api_key:
         st.error("❌ gemini_api_key não encontrada no st.secrets")
         return
@@ -1431,20 +1430,19 @@ def render_gemini_ocr_section():
     # -------------------------
     # modelos
     # -------------------------
-    if st.button("🔍 Listar modelos disponíveis"):
+    if st.button("🔍 Listar modelos disponíveis", key="btn_list_models_ocr"):
         st.session_state._gemini_models = _list_models()
 
     models = st.session_state.get("_gemini_models", [])
-
     if models:
         st.success(f"Modelos encontrados: {len(models)}")
 
     default_model = "models/gemini-2.0-flash"
-
     model_name = st.selectbox(
         "Escolha o modelo",
         options=models if models else [default_model],
-        index=0
+        index=0,
+        key="sel_model_ocr"
     )
 
     st.info("💡 Recomendado: models/gemini-2.0-flash")
@@ -1454,20 +1452,33 @@ def render_gemini_ocr_section():
     # -------------------------
     file = st.file_uploader(
         "Envie imagem da cifra",
-        type=["jpg", "jpeg", "png"]
+        type=["jpg", "jpeg", "png"],
+        key="uploader_ocr"
     )
 
     if not file:
         return
 
-    image_bytes = file.read()
+    # ✅ use getvalue() (não consome o buffer igual read())
+    image_bytes = file.getvalue()
+
+    # ✅ assinatura simples pra detectar troca de arquivo
+    file_sig = (file.name, file.size, getattr(file, "type", ""), hash(image_bytes[:2048]))
+
+    # ✅ se trocou a imagem, limpa o resultado antigo automaticamente
+    if st.session_state.get("_gemini_last_file_sig") != file_sig:
+        st.session_state._gemini_last_file_sig = file_sig
+        st.session_state._gemini_result = None
 
     st.image(image_bytes, caption="Pré-visualização", use_column_width=True)
 
     # -------------------------
     # transcrever
     # -------------------------
-    if st.button("🚀 Transcrever cifra"):
+    if st.button("🚀 Transcrever cifra", key="btn_transcribe_ocr"):
+
+        # ✅ força “refazer” mesmo se já tinha resultado
+        st.session_state._gemini_result = None
 
         with st.spinner("Gemini analisando..."):
             try:
@@ -1485,40 +1496,39 @@ def render_gemini_ocr_section():
     result = st.session_state.get("_gemini_result")
 
     if result:
-       st.markdown("### 📄 Resultado")
+        st.markdown("### 📄 Resultado")
 
-    # CSS: mira exatamente o textarea pelo label (aria-label)
-    st.markdown("""
-    <style>
-      /* SOMENTE o textarea cujo label é "Cifra transcrita" */
-      textarea[aria-label="Cifra transcrita"]{
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        # CSS: mira exatamente o textarea pelo label (aria-label)
+        st.markdown("""
+        <style>
+          textarea[aria-label="Cifra transcrita"]{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
 
-        font-size: clamp(10px, 1.4vw, 14px) !important;
-        line-height: 1.25 !important;
+            font-size: clamp(10px, 1.4vw, 14px) !important;
+            line-height: 1.25 !important;
 
-        white-space: pre !important;      /* não “quebra” espaços */
-        overflow-x: auto !important;      /* scroll horizontal */
-        overflow-y: auto !important;
+            white-space: pre !important;
+            overflow-x: auto !important;
+            overflow-y: auto !important;
 
-        overflow-wrap: normal !important;
-        word-break: normal !important;
-      }
-    </style>
-    """, unsafe_allow_html=True)
+            overflow-wrap: normal !important;
+            word-break: normal !important;
+          }
+        </style>
+        """, unsafe_allow_html=True)
 
-    st.text_area(
-        "Cifra transcrita",
-        result,
-        height=350,
-        key="ocr_result_textarea",
-    )
+        st.text_area(
+            "Cifra transcrita",
+            result,
+            height=350,
+            key="ocr_result_textarea",
+        )
 
-    st.download_button(
-        "💾 Baixar TXT",
-        result,
-        file_name="cifra.txt"
-    )
+        st.download_button(
+            "💾 Baixar TXT",
+            result,
+            file_name="cifra.txt"
+        )
 
 
 # ==============================================================

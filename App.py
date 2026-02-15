@@ -1532,10 +1532,6 @@ def render_gemini_ocr_section():
 
 
 # ==============================================================
-# 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
-# ==============================================================
-
-# ==============================================================
 # 13) PREVIEW (HTML responsivo + auto-fit folha + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================
 
@@ -1839,8 +1835,245 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     return html
 
 # ==============================================================
-# 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — ✅ fullscreen real + swipe
+# 13.2) PDF EXPORT (Página atual + Setlist inteira)
 # ==============================================================
+
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+import textwrap
+
+def _wrap_text(s: str, width_chars: int):
+    s = (s or "").strip()
+    if not s:
+        return [""]
+    lines = []
+    for raw in s.splitlines():
+        if not raw.strip():
+            lines.append("")
+            continue
+        lines.extend(textwrap.wrap(raw, width=width_chars, break_long_words=True, replace_whitespace=False))
+    return lines
+
+def _calc_courier_font_size_for_lines(lines, max_width_pt, max_fs=11, min_fs=6):
+    """
+    Ajusta o tamanho da fonte Courier para a maior linha caber na largura.
+    """
+    lines = lines or [""]
+    longest = max(lines, key=lambda x: len(x or ""))
+    longest = longest or ""
+
+    for fs in range(max_fs, min_fs - 1, -1):
+        w = pdfmetrics.stringWidth(longest, "Courier", fs)
+        if w <= max_width_pt:
+            return fs
+    return min_fs
+
+def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
+    """
+    Reusa a MESMA lógica do preview:
+    - pega cifra do Drive ou item['text']
+    - transpõe se precisar
+    - remove '|' só para exibição
+    - calcula próxima música
+    """
+    itype = item.get("type", "")
+
+    # PAUSA
+    if itype == "pause":
+        return {
+            "is_pause": True,
+            "title": "PAUSA",
+            "artist": "",
+            "tom": "",
+            "bpm": "",
+            "obs": item.get("label", "Pausa"),
+            "prep": "",
+            "cifra_show": "",
+            "next_title": "",
+            "next_artist": "",
+            "next_tom": "",
+            "next_bpm": "",
+        }
+
+    # MÚSICA
+    title = item.get("title", "")
+    artist = item.get("artist", "")
+    tom = item.get("tom", "")
+    bpm = item.get("bpm", "")
+    obs = item.get("obs", "") or ""
+    prep = item.get("preparacao", "") or ""
+
+    # cifra (mesmo critério do preview)
+    cifra_txt = ""
+    use_s = item.get("use_simplificada", False)
+    cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
+
+    if cid:
+        cifra_txt = load_chord_from_drive(cid)
+    else:
+        cifra_txt = item.get("text", "")
+
+    tom_atual = (item.get("tom") or "").strip()
+    tom_original = (item.get("tom_original") or tom_atual).strip()
+
+    if cifra_txt and tom_original and tom_atual and tom_original != tom_atual:
+        cifra_txt = transpose_chord_text(cifra_txt, tom_original, tom_atual)
+
+    cifra_show = strip_chord_markers_for_display(cifra_txt)
+
+    # próxima
+    footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+    next_title = next_artist = next_tom = next_bpm = ""
+    if footer_mode == "next" and footer_next_item:
+        next_title = footer_next_item.get("title", "")
+        next_artist = footer_next_item.get("artist", "")
+        next_tom = footer_next_item.get("tom", "")
+        next_bpm = footer_next_item.get("bpm", "")
+
+    return {
+        "is_pause": False,
+        "title": title,
+        "artist": artist,
+        "tom": tom,
+        "bpm": bpm,
+        "obs": obs,
+        "prep": prep,
+        "cifra_show": cifra_show,
+        "next_title": next_title,
+        "next_artist": next_artist,
+        "next_tom": next_tom,
+        "next_bpm": next_bpm,
+    }
+
+def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
+    """
+    Desenha 1 página A4 com layout parecido com o preview.
+    """
+    margin_x = 14 * mm
+    y = page_h - 14 * mm
+
+    # Header
+    c.setFont("Courier-Bold", 16)
+    c.drawString(margin_x, y, (fields["title"] or "")[:60])
+    y -= 7 * mm
+
+    c.setFont("Courier", 11)
+    if fields.get("artist"):
+        c.drawString(margin_x, y, (fields["artist"] or "")[:80])
+    y -= 9 * mm
+
+    # TOM / BPM
+    c.setFont("Courier-Bold", 11)
+    c.drawRightString(page_w - margin_x, page_h - 14 * mm, f"TOM: {fields.get('tom','')}")
+    c.drawRightString(page_w - margin_x, page_h - 21 * mm, f"BPM: {fields.get('bpm','')}")
+
+    # OBS
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y, "OBS.:")
+    y -= 5 * mm
+
+    c.setFont("Courier", 10)
+    obs_lines = _wrap_text(fields.get("obs", ""), width_chars=92)
+    for ln in obs_lines[:6]:
+        c.drawString(margin_x, y, ln)
+        y -= 4.5 * mm
+    y -= 2 * mm
+
+    # CIFRA
+    cifra = fields.get("cifra_show", "") or ""
+    cifra_lines = cifra.splitlines() if cifra else [""]
+
+    box_w = page_w - 2 * margin_x
+    box_h = 115 * mm  # área principal
+    box_y_top = y
+
+    # borda
+    c.rect(margin_x, box_y_top - box_h, box_w, box_h, stroke=1, fill=0)
+
+    # fonte ajustada pra caber largura
+    fs = _calc_courier_font_size_for_lines(cifra_lines, max_width_pt=box_w - 6*mm, max_fs=11, min_fs=6)
+    line_h = fs * 1.25
+
+    text = c.beginText()
+    text.setTextOrigin(margin_x + 3*mm, box_y_top - 5*mm - fs)
+    text.setFont("Courier", fs)
+
+    max_lines = int((box_h - 10*mm) / (line_h))
+    for ln in cifra_lines[:max_lines]:
+        text.textLine(ln.rstrip("\n"))
+    c.drawText(text)
+
+    y = box_y_top - box_h - 6 * mm
+
+    # PREPARAÇÃO
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y, "PREPARAÇÃO:")
+    y -= 5 * mm
+
+    c.setFont("Courier", 10)
+    prep_lines = _wrap_text(fields.get("prep", ""), width_chars=92)
+    for ln in prep_lines[:6]:
+        c.drawString(margin_x, y, ln)
+        y -= 4.5 * mm
+
+    # Próxima (rodapé)
+    y_footer = 16 * mm
+    c.setLineWidth(1)
+    c.line(margin_x, y_footer + 18*mm, page_w - margin_x, y_footer + 18*mm)
+
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y_footer + 12*mm, "PRÓXIMA:")
+    c.setFont("Courier", 10)
+
+    nxt = f'{fields.get("next_title","")}'
+    if fields.get("next_artist"):
+        nxt += f' – {fields.get("next_artist","")}'
+    c.drawString(margin_x, y_footer + 6*mm, nxt[:110])
+
+    c.setFont("Courier", 10)
+    c.drawRightString(page_w - margin_x, y_footer + 12*mm, f'TOM: {fields.get("next_tom","")}')
+    c.drawRightString(page_w - margin_x, y_footer + 6*mm, f'BPM: {fields.get("next_bpm","")}')
+
+def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Preview"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    fields = _compose_item_fields(item, blocks, b_idx, i_idx)
+    _draw_item_page(c, fields, w, h)
+
+    c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
+
+def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    # achata tudo em ordem
+    flat = []
+    for b_idx, block in enumerate(blocks):
+        for i_idx, it in enumerate(block.get("items", [])):
+            flat.append((b_idx, i_idx, it))
+
+    for (b_idx, i_idx, it) in flat:
+        fields = _compose_item_fields(it, blocks, b_idx, i_idx)
+        _draw_item_page(c, fields, w, h)
+        c.showPage()
+
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
+
 # ==============================================================
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean + FS btn auto-hide
 # ==============================================================
@@ -2174,9 +2407,9 @@ def render_home():
         else:
             st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
 
-    
+
 # ==============================================================
-# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES com TODAS as páginas)
+# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES + ✅ PDF do Preview/Fullscreen)
 # ==============================================================
 
 def main():
@@ -2184,6 +2417,138 @@ def main():
 
     # ---------- ESTADO INICIAL ----------
     init_state()
+
+    # ==========================================================
+    # ✅ Helpers PDF (client-side print) — funciona no Streamlit Cloud
+    # ==========================================================
+    def _extract_body(html: str) -> str:
+        """Extrai o conteúdo entre <body>...</body> de forma robusta."""
+        if not html:
+            return ""
+        low = html.lower()
+        i = low.find("<body")
+        if i == -1:
+            return html
+        i = low.find(">", i)
+        j = low.rfind("</body>")
+        if i == -1 or j == -1 or j <= i:
+            return html
+        return html[i + 1 : j]
+
+    def _print_html_button(label: str, html_str: str, key: str):
+        """
+        Abre uma nova aba com o HTML e chama window.print().
+        OBS: o usuário escolhe "Salvar como PDF" na janela de impressão.
+        """
+        if not html_str:
+            st.warning("Nada para exportar.")
+            return
+
+        payload = json.dumps(html_str)
+
+        # IMPORTANTE: não envolver isso em colunas com outros components.html pesados;
+        # mantenha simples e com height pequeno.
+        st.components.v1.html(
+            f"""
+            <div style="width:100%; display:block;">
+              <button id="btn_{key}"
+                style="
+                  width:100%;
+                  padding:10px 12px;
+                  border-radius:10px;
+                  border:1px solid rgba(0,0,0,0.12);
+                  background:#1976d2;
+                  color:#fff;
+                  font-weight:700;
+                  cursor:pointer;
+                ">
+                {label}
+              </button>
+            </div>
+
+            <script>
+              (function() {{
+                const btn = document.getElementById("btn_{key}");
+                if(!btn) return;
+
+                btn.onclick = function() {{
+                  const w = window.open("", "_blank");
+                  if(!w) {{
+                    alert("Popup bloqueado. Permita popups para este site e tente novamente.");
+                    return;
+                  }}
+                  w.document.open();
+                  w.document.write({payload});
+                  w.document.close();
+
+                  // dá tempo do iframe/estilos carregarem
+                  setTimeout(() => {{
+                    try {{
+                      w.focus();
+                      w.print();
+                    }} catch(e) {{}}
+                  }}, 500);
+                }};
+              }})();
+            </script>
+            """,
+            height=58,
+        )
+
+    def _combine_slides_to_single_html(slides: list[str], titles: list[str] | None = None) -> str:
+        """
+        Junta TODAS as páginas em um único HTML (uma página após a outra)
+        com page-break no print.
+        """
+        if titles is None:
+            titles = ["" for _ in slides]
+        titles = (titles + [""] * len(slides))[: len(slides)]
+
+        pages = []
+        for idx, (h, t) in enumerate(zip(slides, titles), start=1):
+            body = _extract_body(h)
+
+            pages.append(
+                f"""
+                <section class="page">
+                  {body}
+                </section>
+                """
+            )
+
+        return f"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PDL Setlist</title>
+  <style>
+    /* impressão */
+    @media print {{
+      .page {{
+        page-break-after: always;
+      }}
+    }}
+
+    /* garante fundo branco e remove margens do browser quando possível */
+    html, body {{
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }}
+
+    /* cada "page" vira uma página no PDF */
+    .page {{
+      background: #fff;
+    }}
+  </style>
+</head>
+<body>
+  {''.join(pages)}
+</body>
+</html>
+        """.strip()
 
     # ---------- TELA HOME ----------
     if st.session_state.screen == "home":
@@ -2292,17 +2657,43 @@ def main():
             return
 
         # --------------------------------------------------
-        # MODO NORMAL (preview único)
+        # MODO NORMAL (preview único) + ✅ PDF (página / setlist)
         # --------------------------------------------------
         if not st.session_state.pdl_fullscreen:
             footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)
             html_current = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)
 
-            st.components.v1.html(
-                html_current,
-                height=700,
-                scrolling=False,
-            )
+            # ✅ Botões PDF (fora de colunas pesadas)
+            with st.expander("🧾 Exportar PDF", expanded=False):
+                _print_html_button("Salvar PDF (página atual)", html_current, key="pdl_pdf_one")
+
+                # monta setlist inteira (mesma ordem do fullscreen)
+                flat = []
+                for b_idx, block in enumerate(blocks):
+                    for i_idx, it in enumerate(block.get("items", [])):
+                        flat.append((b_idx, i_idx, block.get("name", f"Bloco {b_idx+1}"), it))
+
+                slides_all = []
+                titles_all = []
+
+                def _pretty_title(it: dict) -> str:
+                    if not isinstance(it, dict):
+                        return "Cifra"
+                    if it.get("type") == "pause":
+                        return f"Pausa — {it.get('label','Pausa')}"
+                    s = (it.get("title") or "Música").strip()
+                    a = (it.get("artist") or "").strip()
+                    return f"{s} - {a}".strip(" -")
+
+                for (b_idx, i_idx, blk_name, it) in flat:
+                    fm, fn = get_footer_context(blocks, b_idx, i_idx)
+                    slides_all.append(build_sheet_page_html(it, fm, fn, blk_name))
+                    titles_all.append(_pretty_title(it))
+
+                combined = _combine_slides_to_single_html(slides_all, titles_all)
+                _print_html_button("Salvar PDF (setlist inteira)", combined, key="pdl_pdf_all")
+
+            st.components.v1.html(html_current, height=700, scrolling=False)
             return
 
         # --------------------------------------------------
@@ -2343,16 +2734,20 @@ def main():
 
         for (b_idx, i_idx, blk_name, it) in flat:
             footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
-            html = build_sheet_page_html(it, footer_mode, footer_next_item, blk_name)
-            slides.append(html)
+            slides.append(build_sheet_page_html(it, footer_mode, footer_next_item, blk_name))
             titles.append(_pretty_title(it))
 
-        # 4) renderiza o viewer (com fullscreen via requestFullscreen dentro do HTML)
+        # ✅ Botões PDF também no fullscreen (exporta setlist inteira)
+        with st.expander("🧾 Exportar PDF (fullscreen)", expanded=False):
+            combined = _combine_slides_to_single_html(slides, titles)
+            _print_html_button("Salvar PDF (setlist inteira)", combined, key="pdl_pdf_all_fs")
+
+        # 4) renderiza o viewer
         fullscreen_slides_viewer(
             slides=slides,
             titles=titles,
             start_index=start_index,
-            height=700
+            height=700,
         )
 
 
@@ -2362,3 +2757,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

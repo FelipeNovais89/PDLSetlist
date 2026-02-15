@@ -2428,15 +2428,13 @@ Aqui você pode:
         if st.button("Criar novo", use_container_width=True):
             if new_name.strip():
                 st.session_state.setlist_name = new_name.strip()
-                st.session_state.blocks = [
-                    {"name": "Bloco 1", "items": []}
-                ]
+                st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
                 st.session_state.screen = "editor"
                 st.rerun()
 
 
 # ==============================================================
-# 15) MAIN APP  (DEVE SER A ÚLTIMA SESSÃO)
+# 15) MAIN APP  (tem que ser a última seção de funções)
 # ==============================================================
 
 def main():
@@ -2462,10 +2460,7 @@ def main():
     top_left, top_right = st.columns([3, 1])
 
     with top_left:
-
-        st.markdown(
-            f"### Setlist: {st.session_state.setlist_name}"
-        )
+        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
 
         st.session_state.setlist_name = st.text_input(
             "Nome do setlist",
@@ -2475,17 +2470,11 @@ def main():
 
     with top_right:
 
-        if st.button(
-            "🏠 Home",
-            use_container_width=True
-        ):
+        if st.button("🏠 Home", use_container_width=True):
             st.session_state.screen = "home"
             st.rerun()
 
-        if st.button(
-            "💾 Salvar",
-            use_container_width=True
-        ):
+        if st.button("💾 Salvar", use_container_width=True):
             save_current_setlist_to_github()
 
     # ==========================================================
@@ -2521,7 +2510,7 @@ def main():
 
 
 # ==============================================================
-# EXECUÇÃO (FICA DEPOIS DO MAIN, NO FINAL DO ARQUIVO)
+# 16) EXECUÇÃO (tem que ser o final do arquivo)
 # ==============================================================
 
 if __name__ == "__main__":

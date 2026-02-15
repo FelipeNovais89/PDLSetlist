@@ -2376,179 +2376,11 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 # 14) HOME
 # ==============================================================
 
-def render_home():
-    st.title("PDL Setlist")
-
-    setlist_files = list_setlist_files()
-    setlist_names = [f.replace(".csv", "").replace("_", " ") for f in setlist_files]
-
-    col_new, col_load = st.columns(2)
-
-    with col_new:
-        st.subheader("Nova setlist")
-        default_name = st.session_state.get("setlist_name", "Pagode do LEC")
-        new_name = st.text_input("Nome da nova setlist", value=default_name, key="new_setlist_name")
-        if st.button("Criar setlist", key="btn_create_setlist"):
-            st.session_state.setlist_name = new_name.strip() or "Setlist sem nome"
-            st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
-            st.session_state.current_item = None
-            st.session_state.selected_block_idx = None
-            st.session_state.selected_item_idx = None
-            st.session_state.screen = "editor"
-            st.rerun()
-
-    with col_load:
-        st.subheader("Carregar setlist existente (GitHub)")
-        if setlist_names:
-            selected = st.selectbox("Escolha", options=setlist_names, key="load_setlist_select")
-            if st.button("Carregar", key="btn_load_setlist"):
-                load_setlist_into_state_from_github(selected, st.session_state.songs_df)
-                st.rerun()
-        else:
-            st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
-
-
-# ==============================================================
-# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES + ✅ PDF do Preview/Fullscreen)
-# ==============================================================
-
 def main():
     st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
 
     # ---------- ESTADO INICIAL ----------
     init_state()
-
-    # ==========================================================
-    # ✅ Helpers PDF (client-side print) — funciona no Streamlit Cloud
-    # ==========================================================
-    def _extract_body(html: str) -> str:
-        """Extrai o conteúdo entre <body>...</body> de forma robusta."""
-        if not html:
-            return ""
-        low = html.lower()
-        i = low.find("<body")
-        if i == -1:
-            return html
-        i = low.find(">", i)
-        j = low.rfind("</body>")
-        if i == -1 or j == -1 or j <= i:
-            return html
-        return html[i + 1 : j]
-
-    def _print_html_button(label: str, html_str: str, key: str):
-        """
-        Abre uma nova aba com o HTML e chama window.print().
-        OBS: o usuário escolhe "Salvar como PDF" na janela de impressão.
-        """
-        if not html_str:
-            st.warning("Nada para exportar.")
-            return
-
-        payload = json.dumps(html_str)
-
-        # IMPORTANTE: não envolver isso em colunas com outros components.html pesados;
-        # mantenha simples e com height pequeno.
-        st.components.v1.html(
-            f"""
-            <div style="width:100%; display:block;">
-              <button id="btn_{key}"
-                style="
-                  width:100%;
-                  padding:10px 12px;
-                  border-radius:10px;
-                  border:1px solid rgba(0,0,0,0.12);
-                  background:#1976d2;
-                  color:#fff;
-                  font-weight:700;
-                  cursor:pointer;
-                ">
-                {label}
-              </button>
-            </div>
-
-            <script>
-              (function() {{
-                const btn = document.getElementById("btn_{key}");
-                if(!btn) return;
-
-                btn.onclick = function() {{
-                  const w = window.open("", "_blank");
-                  if(!w) {{
-                    alert("Popup bloqueado. Permita popups para este site e tente novamente.");
-                    return;
-                  }}
-                  w.document.open();
-                  w.document.write({payload});
-                  w.document.close();
-
-                  // dá tempo do iframe/estilos carregarem
-                  setTimeout(() => {{
-                    try {{
-                      w.focus();
-                      w.print();
-                    }} catch(e) {{}}
-                  }}, 500);
-                }};
-              }})();
-            </script>
-            """,
-            height=58,
-        )
-
-    def _combine_slides_to_single_html(slides: list[str], titles: list[str] | None = None) -> str:
-        """
-        Junta TODAS as páginas em um único HTML (uma página após a outra)
-        com page-break no print.
-        """
-        if titles is None:
-            titles = ["" for _ in slides]
-        titles = (titles + [""] * len(slides))[: len(slides)]
-
-        pages = []
-        for idx, (h, t) in enumerate(zip(slides, titles), start=1):
-            body = _extract_body(h)
-
-            pages.append(
-                f"""
-                <section class="page">
-                  {body}
-                </section>
-                """
-            )
-
-        return f"""
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PDL Setlist</title>
-  <style>
-    /* impressão */
-    @media print {{
-      .page {{
-        page-break-after: always;
-      }}
-    }}
-
-    /* garante fundo branco e remove margens do browser quando possível */
-    html, body {{
-      margin: 0;
-      padding: 0;
-      background: #fff;
-    }}
-
-    /* cada "page" vira uma página no PDF */
-    .page {{
-      background: #fff;
-    }}
-  </style>
-</head>
-<body>
-  {''.join(pages)}
-</body>
-</html>
-        """.strip()
 
     # ---------- TELA HOME ----------
     if st.session_state.screen == "home":
@@ -2574,53 +2406,57 @@ def main():
         if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):
             save_current_setlist_to_github()
 
-    # ---------- LAYOUT PRINCIPAL ----------
+    # ---------- LAYOUT ----------
     left_col, right_col = st.columns([1.1, 1])
 
     # ==========================================================
-    # COLUNA ESQUERDA — EDITORES
+    # COLUNA ESQUERDA
     # ==========================================================
     with left_col:
+
         st.subheader("Editor de Setlist (modo árvore)")
         render_setlist_editor_tree()
 
         st.markdown("---")
+
         render_song_database()
 
         render_gemini_ocr_section()
 
     # ==========================================================
-    # COLUNA DIREITA — PREVIEW (COM FULLSCREEN SLIDES)
+    # COLUNA DIREITA — PREVIEW + FULLSCREEN + PDF
     # ==========================================================
     with right_col:
+
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
 
-        # estado do fullscreen (persistente)
         if "pdl_fullscreen" not in st.session_state:
             st.session_state.pdl_fullscreen = False
 
-        # botões de controle
+        # Botões fullscreen
         b1, b2 = st.columns([1, 1])
+
         with b1:
-            if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True, key="btn_fs_on"):
+            if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True):
                 st.session_state.pdl_fullscreen = True
                 st.rerun()
+
         with b2:
-            if st.button("⬅️ Voltar", use_container_width=True, key="btn_fs_off"):
+            if st.button("⬅️ Voltar", use_container_width=True):
                 st.session_state.pdl_fullscreen = False
                 st.rerun()
 
-        # --------------------------------------------------
-        # Seleção do "current_item" (para preview normal)
-        # --------------------------------------------------
+        # ======================================================
+        # Detecta item atual
+        # ======================================================
+
         current_item = None
         current_block_name = ""
         cur_block_idx = None
         cur_item_idx = None
 
-        # PRIORIDADE 1 — ITEM SELECIONADO NO EDITOR
         sel_b = st.session_state.selected_block_idx
         sel_i = st.session_state.selected_item_idx
 
@@ -2631,7 +2467,6 @@ def main():
                 cur_block_idx = sel_b
                 cur_item_idx = sel_i
 
-        # PRIORIDADE 2 — ITEM MARCADO COM 👁 (current_item)
         if current_item is None:
             cur = st.session_state.current_item
             if cur is not None:
@@ -2642,7 +2477,6 @@ def main():
                     cur_block_idx = b_idx
                     cur_item_idx = i_idx
 
-        # PRIORIDADE 3 — PRIMEIRO ITEM DO SETLIST
         if current_item is None:
             for b_idx, block in enumerate(blocks):
                 if block.get("items"):
@@ -2653,96 +2487,134 @@ def main():
                     break
 
         if current_item is None:
-            st.info("Adicione músicas ao setlist para ver o preview.")
+            st.info("Adicione músicas ao setlist.")
             return
 
-        # --------------------------------------------------
-        # MODO NORMAL (preview único) + ✅ PDF (página / setlist)
-        # --------------------------------------------------
+        # ======================================================
+        # MODO NORMAL
+        # ======================================================
+
         if not st.session_state.pdl_fullscreen:
-            footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)
-            html_current = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)
 
-            # ✅ Botões PDF (fora de colunas pesadas)
+            footer_mode, footer_next_item = get_footer_context(
+                blocks, cur_block_idx, cur_item_idx
+            )
+
+            html_current = build_sheet_page_html(
+                current_item,
+                footer_mode,
+                footer_next_item,
+                current_block_name
+            )
+
+            # ===============================
+            # EXPORTAR PDF
+            # ===============================
             with st.expander("🧾 Exportar PDF", expanded=False):
-                _print_html_button("Salvar PDF (página atual)", html_current, key="pdl_pdf_one")
 
-                # monta setlist inteira (mesma ordem do fullscreen)
-                flat = []
-                for b_idx, block in enumerate(blocks):
-                    for i_idx, it in enumerate(block.get("items", [])):
-                        flat.append((b_idx, i_idx, block.get("name", f"Bloco {b_idx+1}"), it))
+                # PDF página atual
+                pdf_bytes, pdf_name = make_pdf_for_single_item(
+                    current_item,
+                    blocks,
+                    cur_block_idx,
+                    cur_item_idx,
+                    filename_base=f"PDL_{st.session_state.setlist_name}_pagina"
+                )
 
-                slides_all = []
-                titles_all = []
+                st.download_button(
+                    "⬇️ Baixar PDF (página atual)",
+                    data=pdf_bytes,
+                    file_name=pdf_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
 
-                def _pretty_title(it: dict) -> str:
-                    if not isinstance(it, dict):
-                        return "Cifra"
-                    if it.get("type") == "pause":
-                        return f"Pausa — {it.get('label','Pausa')}"
-                    s = (it.get("title") or "Música").strip()
-                    a = (it.get("artist") or "").strip()
-                    return f"{s} - {a}".strip(" -")
+                # PDF setlist completa
+                pdf_all_bytes, pdf_all_name = make_pdf_for_full_setlist(
+                    blocks,
+                    filename_base=f"PDL_{st.session_state.setlist_name}_setlist"
+                )
 
-                for (b_idx, i_idx, blk_name, it) in flat:
-                    fm, fn = get_footer_context(blocks, b_idx, i_idx)
-                    slides_all.append(build_sheet_page_html(it, fm, fn, blk_name))
-                    titles_all.append(_pretty_title(it))
+                st.download_button(
+                    "⬇️ Baixar PDF (setlist inteira)",
+                    data=pdf_all_bytes,
+                    file_name=pdf_all_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
 
-                combined = _combine_slides_to_single_html(slides_all, titles_all)
-                _print_html_button("Salvar PDF (setlist inteira)", combined, key="pdl_pdf_all")
+            st.components.v1.html(
+                html_current,
+                height=700,
+                scrolling=False
+            )
 
-            st.components.v1.html(html_current, height=700, scrolling=False)
             return
 
-        # --------------------------------------------------
-        # MODO FULLSCREEN (slides) — ✅ TODAS as páginas da setlist
-        # --------------------------------------------------
+        # ======================================================
+        # FULLSCREEN MODE
+        # ======================================================
 
-        # 1) “achata” todos os itens em ordem (bloco por bloco)
         flat = []
+
         for b_idx, block in enumerate(blocks):
-            items = block.get("items", [])
-            for i_idx, it in enumerate(items):
-                flat.append((b_idx, i_idx, block.get("name", f"Bloco {b_idx+1}"), it))
+            for i_idx, it in enumerate(block.get("items", [])):
+                flat.append((b_idx, i_idx, block.get("name", ""), it))
 
         if not flat:
-            st.info("Sem itens para exibir em fullscreen.")
+            st.info("Sem itens.")
             return
 
-        # 2) define o índice inicial (mesmo item que está no preview)
         start_index = 0
-        if cur_block_idx is not None and cur_item_idx is not None:
-            for k, (b, i, _, _) in enumerate(flat):
-                if b == cur_block_idx and i == cur_item_idx:
-                    start_index = k
-                    break
 
-        # 3) monta slides e títulos
+        for k, (b, i, _, _) in enumerate(flat):
+            if b == cur_block_idx and i == cur_item_idx:
+                start_index = k
+                break
+
         slides = []
         titles = []
 
-        def _pretty_title(it: dict) -> str:
-            if not isinstance(it, dict):
-                return "Cifra"
+        def pretty_title(it):
             if it.get("type") == "pause":
                 return f"Pausa — {it.get('label','Pausa')}"
-            s = (it.get("title") or "Música").strip()
-            a = (it.get("artist") or "").strip()
-            return f"{s} - {a}".strip(" -")
+            return f"{it.get('title','')} - {it.get('artist','')}"
 
         for (b_idx, i_idx, blk_name, it) in flat:
-            footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
-            slides.append(build_sheet_page_html(it, footer_mode, footer_next_item, blk_name))
-            titles.append(_pretty_title(it))
 
-        # ✅ Botões PDF também no fullscreen (exporta setlist inteira)
-        with st.expander("🧾 Exportar PDF (fullscreen)", expanded=False):
-            combined = _combine_slides_to_single_html(slides, titles)
-            _print_html_button("Salvar PDF (setlist inteira)", combined, key="pdl_pdf_all_fs")
+            footer_mode, footer_next_item = get_footer_context(
+                blocks, b_idx, i_idx
+            )
 
-        # 4) renderiza o viewer
+            slides.append(
+                build_sheet_page_html(
+                    it,
+                    footer_mode,
+                    footer_next_item,
+                    blk_name
+                )
+            )
+
+            titles.append(pretty_title(it))
+
+        # ===============================
+        # EXPORTAR PDF FULLSCREEN
+        # ===============================
+        with st.expander("🧾 Exportar PDF", expanded=False):
+
+            pdf_all_bytes, pdf_all_name = make_pdf_for_full_setlist(
+                blocks,
+                filename_base=f"PDL_{st.session_state.setlist_name}_setlist"
+            )
+
+            st.download_button(
+                "⬇️ Baixar PDF (setlist inteira)",
+                data=pdf_all_bytes,
+                file_name=pdf_all_name,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
         fullscreen_slides_viewer(
             slides=slides,
             titles=titles,

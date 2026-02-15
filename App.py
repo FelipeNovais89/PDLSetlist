@@ -2373,13 +2373,14 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     components.html(html, height=height, scrolling=False)
 
 # ==============================================================
-# 14) HOME
+# 14) HOME  + PREVIEW SECTION
 # ==============================================================
 # ==============================================================
 # 14) HOME
 # ==============================================================
 
 def render_home():
+
     st.title("🎵 PDL Setlist")
 
     st.markdown("""
@@ -2402,39 +2403,154 @@ Aqui você pode:
 
     col1, col2 = st.columns(2)
 
+    # -------------------------
+    # abrir existente
+    # -------------------------
     with col1:
+
         selected = st.selectbox(
             "Abrir setlist existente",
             options=[""] + setlists,
             key="home_select_setlist"
         )
 
-        if st.button("Abrir", use_container_width=True):
+        if st.button(
+            "Abrir",
+            key="home_btn_open",
+            use_container_width=True
+        ):
+
             if selected:
+
                 name = selected.replace(".csv", "")
+
                 load_setlist_into_state_from_github(
                     name,
                     st.session_state.songs_df
                 )
+
                 st.session_state.screen = "editor"
                 st.rerun()
 
+    # -------------------------
+    # criar novo
+    # -------------------------
     with col2:
+
         new_name = st.text_input(
             "Criar novo setlist",
             key="home_new_setlist"
         )
 
-        if st.button("Criar novo", use_container_width=True):
-            if new_name.strip():
-                st.session_state.setlist_name = new_name.strip()
-                st.session_state.blocks = [{"name": "Bloco 1", "items": []}]
-                st.session_state.screen = "editor"
-                st.rerun()
+        if st.button(
+            "Criar novo",
+            key="home_btn_create",
+            use_container_width=True
+        ):
 
+            if new_name.strip():
+
+                st.session_state.setlist_name = new_name.strip()
+
+                st.session_state.blocks = [
+                    {"name": "Bloco 1", "items": []}
+                ]
+
+                st.session_state.screen = "editor"
+
+                st.rerun()
+# ==============================================================
+# 14.5) PREVIEW SECTION
+# ==============================================================
+
+def render_preview_section():
+
+    blocks = st.session_state.blocks
+
+    cur = st.session_state.get("current_item")
+
+    if not cur:
+
+        st.info("Selecione uma música para visualizar.")
+
+        return
+
+    b_idx, i_idx = cur
+
+    if b_idx >= len(blocks):
+        return
+
+    items = blocks[b_idx]["items"]
+
+    if i_idx >= len(items):
+        return
+
+    item = items[i_idx]
+
+    footer_mode, footer_next_item = get_footer_context(
+        blocks,
+        b_idx,
+        i_idx
+    )
+
+    html = build_sheet_page_html(
+        item,
+        footer_mode,
+        footer_next_item,
+        blocks[b_idx]["name"]
+    )
+
+    import streamlit.components.v1 as components
+
+    components.html(
+        html,
+        height=900,
+        scrolling=True
+    )
+
+    st.markdown("---")
+
+    # =========================
+    # BOTÕES PDF
+    # =========================
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        pdf_bytes, pdf_name = make_pdf_for_single_item(
+            item,
+            blocks,
+            b_idx,
+            i_idx,
+            filename_base=item.get("title", "Preview")
+        )
+
+        st.download_button(
+            "📄 Baixar PDF (esta página)",
+            data=pdf_bytes,
+            file_name=pdf_name,
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+    with col2:
+
+        pdf_bytes, pdf_name = make_pdf_for_full_setlist(
+            blocks,
+            filename_base=st.session_state.setlist_name
+        )
+
+        st.download_button(
+            "📚 Baixar PDF (setlist completa)",
+            data=pdf_bytes,
+            file_name=pdf_name,
+            mime="application/pdf",
+            use_container_width=True
+        )
 
 # ==============================================================
-# 15) MAIN APP  (tem que ser a última seção de funções)
+# 15) MAIN
 # ==============================================================
 
 def main():
@@ -2447,47 +2563,70 @@ def main():
 
     init_state()
 
-    # ==========================================================
+    # =========================
     # HOME
-    # ==========================================================
+    # =========================
+
     if st.session_state.screen == "home":
+
         render_home()
+
         return
 
-    # ==========================================================
-    # HEADER
-    # ==========================================================
-    top_left, top_right = st.columns([3, 1])
 
-    with top_left:
-        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
+    # =========================
+    # HEADER
+    # =========================
+
+    col1, col2 = st.columns([3,1])
+
+    with col1:
+
+        st.markdown(
+            f"### Setlist: {st.session_state.setlist_name}"
+        )
 
         st.session_state.setlist_name = st.text_input(
             "Nome do setlist",
             value=st.session_state.setlist_name,
-            label_visibility="collapsed",
+            label_visibility="collapsed"
         )
 
-    with top_right:
 
-        if st.button("🏠 Home", use_container_width=True):
+    with col2:
+
+        if st.button(
+            "🏠 Home",
+            key="btn_main_home",
+            use_container_width=True
+        ):
+
             st.session_state.screen = "home"
+
             st.rerun()
 
-        if st.button("💾 Salvar", use_container_width=True):
+
+        if st.button(
+            "💾 Salvar",
+            key="btn_main_save",
+            use_container_width=True
+        ):
+
             save_current_setlist_to_github()
 
-    # ==========================================================
+
+    # =========================
     # LAYOUT PRINCIPAL
-    # ==========================================================
-    left_col, right_col = st.columns([1.1, 1])
+    # =========================
 
-    # ==========================================================
+    left_col, right_col = st.columns([1.1,1])
+
+
+    # =========================
     # COLUNA ESQUERDA
-    # ==========================================================
-    with left_col:
+    # =========================
 
-        st.subheader("Editor")
+    with left_col:
 
         render_setlist_editor_tree()
 
@@ -2499,19 +2638,19 @@ def main():
 
         render_gemini_ocr_section()
 
-    # ==========================================================
-    # COLUNA DIREITA (PREVIEW)
-    # ==========================================================
-    with right_col:
 
-        st.subheader("Preview")
+    # =========================
+    # COLUNA DIREITA (PREVIEW)
+    # =========================
+
+    with right_col:
 
         render_preview_section()
 
-
 # ==============================================================
-# 16) EXECUÇÃO (tem que ser o final do arquivo)
+# EXECUÇÃO
 # ==============================================================
 
 if __name__ == "__main__":
+
     main()

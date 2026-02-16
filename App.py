@@ -1530,11 +1530,6 @@ def render_gemini_ocr_section():
             file_name="cifra.txt"
         )
 
-
-# ==============================================================
-# 13) PREVIEW (HTML responsivo + auto-fit cifra + OBS/PREPARAÇÃO)
-# ==============================================================
-
 # ==============================================================
 # 13) PREVIEW (HTML responsivo + auto-fit folha + auto-fit cifra + OBS/PREPARAÇÃO)
 # ==============================================================
@@ -2140,6 +2135,256 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     components.html(html, height=height, scrolling=False)
 
 # ==============================================================
+# 13.6) PDF EXPORT — IGUAL AO PREVIEW (Página atual + Setlist inteira)
+# ==============================================================
+
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+import textwrap
+
+def _wrap_text(s: str, width_chars: int):
+    s = (s or "").strip()
+    if not s:
+        return [""]
+    lines = []
+    for raw in s.splitlines():
+        if not raw.strip():
+            lines.append("")
+            continue
+        lines.extend(textwrap.wrap(raw, width=width_chars, break_long_words=True, replace_whitespace=False))
+    return lines
+
+def _calc_courier_font_size_for_lines(lines, max_width_pt, max_fs=11, min_fs=6):
+    """
+    Ajusta o tamanho da fonte Courier para a maior linha caber na largura.
+    """
+    lines = lines or [""]
+    longest = max(lines, key=lambda x: len(x or ""))
+    longest = longest or ""
+
+    for fs in range(max_fs, min_fs - 1, -1):
+        w = pdfmetrics.stringWidth(longest, "Courier", fs)
+        if w <= max_width_pt:
+            return fs
+    return min_fs
+
+def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
+    """
+    Reusa a MESMA lógica do preview:
+    - pega cifra do Drive ou item['text']
+    - transpõe se precisar
+    - remove '|' só para exibição
+    - calcula próxima música
+    """
+    itype = item.get("type", "")
+
+    # PAUSA
+    if itype == "pause":
+        return {
+            "is_pause": True,
+            "title": "PAUSA",
+            "artist": "",
+            "tom": "",
+            "bpm": "",
+            "obs": item.get("label", "Pausa"),
+            "prep": "",
+            "cifra_show": "",
+            "next_title": "",
+            "next_artist": "",
+            "next_tom": "",
+            "next_bpm": "",
+        }
+
+    # MÚSICA
+    title = item.get("title", "")
+    artist = item.get("artist", "")
+    tom = item.get("tom", "")
+    bpm = item.get("bpm", "")
+    obs = item.get("obs", "") or ""
+    prep = item.get("preparacao", "") or ""
+
+    # cifra (mesmo critério do preview)
+    cifra_txt = ""
+    use_s = item.get("use_simplificada", False)
+    cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
+
+    if cid:
+        cifra_txt = load_chord_from_drive(cid)
+    else:
+        cifra_txt = item.get("text", "")
+
+    tom_atual = (item.get("tom") or "").strip()
+    tom_original = (item.get("tom_original") or tom_atual).strip()
+
+    if cifra_txt and tom_original and tom_atual and tom_original != tom_atual:
+        cifra_txt = transpose_chord_text(cifra_txt, tom_original, tom_atual)
+
+    # só depois remove o "|" para exibição (igual preview)
+    cifra_show = strip_chord_markers_for_display(cifra_txt)
+
+    # próxima
+    footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+    next_title = next_artist = next_tom = next_bpm = ""
+    if footer_mode == "next" and footer_next_item:
+        if footer_next_item.get("type") == "pause":
+            next_title = "PAUSA"
+            next_artist = footer_next_item.get("label", "Pausa")
+            next_tom = ""
+            next_bpm = ""
+        else:
+            next_title = footer_next_item.get("title", "")
+            next_artist = footer_next_item.get("artist", "")
+            next_tom = footer_next_item.get("tom", "")
+            next_bpm = footer_next_item.get("bpm", "")
+
+    return {
+        "is_pause": False,
+        "title": title,
+        "artist": artist,
+        "tom": tom,
+        "bpm": bpm,
+        "obs": obs,
+        "prep": prep,
+        "cifra_show": cifra_show,
+        "next_title": next_title,
+        "next_artist": next_artist,
+        "next_tom": next_tom,
+        "next_bpm": next_bpm,
+    }
+
+def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
+    """
+    Desenha 1 página A4 com layout parecido com o preview.
+    """
+    margin_x = 14 * mm
+    y = page_h - 14 * mm
+
+    # Header
+    c.setFont("Courier-Bold", 16)
+    c.drawString(margin_x, y, (fields["title"] or "")[:60])
+    y -= 7 * mm
+
+    c.setFont("Courier", 11)
+    if fields.get("artist"):
+        c.drawString(margin_x, y, (fields["artist"] or "")[:80])
+    y -= 9 * mm
+
+    # TOM / BPM (direita)
+    c.setFont("Courier-Bold", 11)
+    c.drawRightString(page_w - margin_x, page_h - 14 * mm, f"TOM: {fields.get('tom','')}")
+    c.drawRightString(page_w - margin_x, page_h - 21 * mm, f"BPM: {fields.get('bpm','')}")
+
+    # OBS
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y, "OBS.:")
+    y -= 5 * mm
+
+    c.setFont("Courier", 10)
+    obs_lines = _wrap_text(fields.get("obs", ""), width_chars=92)
+    for ln in obs_lines[:6]:
+        c.drawString(margin_x, y, ln)
+        y -= 4.5 * mm
+    y -= 2 * mm
+
+    # CIFRA (caixa)
+    cifra = fields.get("cifra_show", "") or ""
+    cifra_lines = cifra.splitlines() if cifra else [""]
+
+    box_w = page_w - 2 * margin_x
+    box_h = 115 * mm
+    box_y_top = y
+
+    c.rect(margin_x, box_y_top - box_h, box_w, box_h, stroke=1, fill=0)
+
+    fs = _calc_courier_font_size_for_lines(
+        cifra_lines,
+        max_width_pt=box_w - 6*mm,
+        max_fs=11,
+        min_fs=6
+    )
+    line_h = fs * 1.25
+
+    text = c.beginText()
+    text.setTextOrigin(margin_x + 3*mm, box_y_top - 5*mm - fs)
+    text.setFont("Courier", fs)
+
+    max_lines = int((box_h - 10*mm) / (line_h))
+    for ln in cifra_lines[:max_lines]:
+        text.textLine(ln.rstrip("\n"))
+    c.drawText(text)
+
+    y = box_y_top - box_h - 6 * mm
+
+    # PREPARAÇÃO
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y, "PREPARAÇÃO:")
+    y -= 5 * mm
+
+    c.setFont("Courier", 10)
+    prep_lines = _wrap_text(fields.get("prep", ""), width_chars=92)
+    for ln in prep_lines[:6]:
+        c.drawString(margin_x, y, ln)
+        y -= 4.5 * mm
+
+    # Próxima (rodapé)
+    y_footer = 16 * mm
+    c.setLineWidth(1)
+    c.line(margin_x, y_footer + 18*mm, page_w - margin_x, y_footer + 18*mm)
+
+    c.setFont("Courier-Bold", 11)
+    c.drawString(margin_x, y_footer + 12*mm, "PRÓXIMA:")
+    c.setFont("Courier", 10)
+
+    nxt = f'{fields.get("next_title","")}'
+    if fields.get("next_artist"):
+        nxt += f' – {fields.get("next_artist","")}'
+    c.drawString(margin_x, y_footer + 6*mm, nxt[:110])
+
+    c.setFont("Courier", 10)
+    c.drawRightString(page_w - margin_x, y_footer + 12*mm, f'TOM: {fields.get("next_tom","")}')
+    c.drawRightString(page_w - margin_x, y_footer + 6*mm, f'BPM: {fields.get("next_bpm","")}')
+
+def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Preview"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    fields = _compose_item_fields(item, blocks, b_idx, i_idx)
+    _draw_item_page(c, fields, w, h)
+
+    c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
+
+def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    # achata tudo em ordem
+    flat = []
+    for b_idx, block in enumerate(blocks):
+        for i_idx, it in enumerate(block.get("items", [])):
+            flat.append((b_idx, i_idx, it))
+
+    for (b_idx, i_idx, it) in flat:
+        fields = _compose_item_fields(it, blocks, b_idx, i_idx)
+        _draw_item_page(c, fields, w, h)
+        c.showPage()
+
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
+
+# ==============================================================
 # 14) HOME
 # ==============================================================
 
@@ -2231,6 +2476,30 @@ def main():
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
+        # ==========================================================
+        # ✅ BOTÕES PDF (IGUAL AO PREVIEW)
+        # ==========================================================
+        pdf_col1, pdf_col2 = st.columns(2)
+
+        # PDF da setlist inteira
+        with pdf_col1:
+            if blocks:
+                pdf_all_bytes, pdf_all_name = make_pdf_for_full_setlist(
+                    blocks,
+                    filename_base=f"{st.session_state.setlist_name} (Setlist)"
+                )
+                st.download_button(
+                    "📄 Baixar PDF (Setlist inteira)",
+                    data=pdf_all_bytes,
+                    file_name=pdf_all_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="dl_pdf_full"
+                )
+
+        # PDF da página atual (vai funcionar depois que current_item for definido)
+        with pdf_col2:
+            st.caption("PDF da página atual aparece após selecionar uma música (ou usar 👁).")
 
         # estado do fullscreen (persistente)
         if "pdl_fullscreen" not in st.session_state:
@@ -2290,6 +2559,24 @@ def main():
         if current_item is None:
             st.info("Adicione músicas ao setlist para ver o preview.")
             return
+
+        # PDF da página atual (depois que sabemos o item atual)
+        if current_item is not None and cur_block_idx is not None and cur_item_idx is not None:
+            pdf_one_bytes, pdf_one_name = make_pdf_for_single_item(
+                current_item,
+                blocks,
+                cur_block_idx,
+                cur_item_idx,
+                filename_base=f"{st.session_state.setlist_name} (Página atual)"
+            )
+            st.download_button(
+                "📄 Baixar PDF (Página atual)",
+                data=pdf_one_bytes,
+                file_name=pdf_one_name,
+                mime="application/pdf",
+                use_container_width=True,
+                key="dl_pdf_one"
+            )
 
         # --------------------------------------------------
         # MODO NORMAL (preview único)

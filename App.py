@@ -2136,6 +2136,11 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 
 # ==============================================================
 # 13.6) PDF EXPORT — IGUAL AO PREVIEW (Página atual + Setlist inteira)
+#   ✅ Corrigido:
+#   - Layout mais parecido com o preview (header + linhas + caixas)
+#   - Caixa da cifra com altura dinâmica (usa o espaço que sobra)
+#   - Auto-fit da cifra por LARGURA e ALTURA (não corta / não “sobra”)
+#   - Fonte mono com suporte a acentos (tenta DejaVuSansMono; fallback Courier)
 # ==============================================================
 
 from io import BytesIO
@@ -2143,34 +2148,110 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
 import textwrap
 
-def _wrap_text(s: str, width_chars: int):
-    s = (s or "").strip()
-    if not s:
+# -----------------------------
+# Fonte (mono) com acentos
+# -----------------------------
+PDF_FONT_REG = {"name": "Courier", "bold": "Courier-Bold"}  # fallback
+
+def _ensure_pdf_font():
+    """
+    Tenta registrar DejaVuSansMono (mono, boa p/ cifra, com acentos).
+    Se não existir, usa Courier padrão.
+    """
+    global PDF_FONT_REG
+
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",  # repetido ok
+    ]
+
+    mono_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    mono_bold_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+
+    try:
+        if os.path.exists(mono_path):
+            pdfmetrics.registerFont(TTFont("PDLMono", mono_path))
+            PDF_FONT_REG["name"] = "PDLMono"
+        if os.path.exists(mono_bold_path):
+            pdfmetrics.registerFont(TTFont("PDLMono-Bold", mono_bold_path))
+            PDF_FONT_REG["bold"] = "PDLMono-Bold"
+        # se registrou pelo menos a normal, já melhora bastante
+    except Exception:
+        PDF_FONT_REG = {"name": "Courier", "bold": "Courier-Bold"}
+
+_ensure_pdf_font()
+
+
+# -----------------------------
+# Helpers de texto
+# -----------------------------
+def _wrap_text_lines(s: str, max_chars: int):
+    """
+    Wrap por caracteres (mono). Preserva quebras e linhas vazias.
+    """
+    s = (s or "")
+    if not s.strip():
         return [""]
-    lines = []
+
+    out = []
     for raw in s.splitlines():
         if not raw.strip():
-            lines.append("")
+            out.append("")
             continue
-        lines.extend(textwrap.wrap(raw, width=width_chars, break_long_words=True, replace_whitespace=False))
-    return lines
+        out.extend(
+            textwrap.wrap(
+                raw,
+                width=max_chars,
+                break_long_words=True,
+                replace_whitespace=False,
+                drop_whitespace=False,
+            )
+        )
+    return out
 
-def _calc_courier_font_size_for_lines(lines, max_width_pt, max_fs=11, min_fs=6):
-    """
-    Ajusta o tamanho da fonte Courier para a maior linha caber na largura.
-    """
-    lines = lines or [""]
+
+def _max_line_width_pt(lines, font_name, font_size):
+    if not lines:
+        return 0
     longest = max(lines, key=lambda x: len(x or ""))
-    longest = longest or ""
+    return pdfmetrics.stringWidth(longest or "", font_name, font_size)
 
-    for fs in range(max_fs, min_fs - 1, -1):
-        w = pdfmetrics.stringWidth(longest, "Courier", fs)
-        if w <= max_width_pt:
-            return fs
+
+def _calc_mono_font_size_fit(lines, box_w_pt, box_h_pt, font_name, max_fs=12, min_fs=6, padding_pt=10):
+    """
+    Auto-fit igual ao preview:
+    - reduz fonte até CABER na largura e na altura da caixa.
+    - considera leading ~ 1.25x
+    """
+    lines = lines if lines else [""]
+
+    usable_w = max(1, box_w_pt - padding_pt)
+    usable_h = max(1, box_h_pt - padding_pt)
+
+    for fs in [x / 2 for x in range(int(max_fs * 2), int(min_fs * 2) - 1, -1)]:  # step 0.5
+        # largura
+        if _max_line_width_pt(lines, font_name, fs) > usable_w:
+            continue
+
+        # altura
+        leading = fs * 1.25
+        total_h = len(lines) * leading
+        if total_h > usable_h:
+            continue
+
+        return fs
+
     return min_fs
 
+
+# -----------------------------
+# Reuso da lógica do preview (mesma que você já tinha)
+# -----------------------------
 def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
     """
     Reusa a MESMA lógica do preview:
@@ -2183,6 +2264,18 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
 
     # PAUSA
     if itype == "pause":
+        footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
+        next_title = next_artist = next_tom = next_bpm = ""
+        if footer_mode == "next" and footer_next_item:
+            if footer_next_item.get("type") == "pause":
+                next_title = "PAUSA"
+                next_artist = footer_next_item.get("label", "Pausa")
+            else:
+                next_title = footer_next_item.get("title", "")
+                next_artist = footer_next_item.get("artist", "")
+                next_tom = footer_next_item.get("tom", "")
+                next_bpm = footer_next_item.get("bpm", "")
+
         return {
             "is_pause": True,
             "title": "PAUSA",
@@ -2192,10 +2285,10 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
             "obs": item.get("label", "Pausa"),
             "prep": "",
             "cifra_show": "",
-            "next_title": "",
-            "next_artist": "",
-            "next_tom": "",
-            "next_bpm": "",
+            "next_title": next_title,
+            "next_artist": next_artist,
+            "next_tom": next_tom,
+            "next_bpm": next_bpm,
         }
 
     # MÚSICA
@@ -2232,8 +2325,6 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
         if footer_next_item.get("type") == "pause":
             next_title = "PAUSA"
             next_artist = footer_next_item.get("label", "Pausa")
-            next_tom = ""
-            next_bpm = ""
         else:
             next_title = footer_next_item.get("title", "")
             next_artist = footer_next_item.get("artist", "")
@@ -2255,98 +2346,220 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
         "next_bpm": next_bpm,
     }
 
-def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
-    """
-    Desenha 1 página A4 com layout parecido com o preview.
-    """
-    margin_x = 14 * mm
-    y = page_h - 14 * mm
 
-    # Header
-    c.setFont("Courier-Bold", 16)
-    c.drawString(margin_x, y, (fields["title"] or "")[:60])
+# -----------------------------
+# Desenho de 1 página (layout “igual preview”)
+# -----------------------------
+def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
+    FONT = PDF_FONT_REG["name"]
+    FONT_B = PDF_FONT_REG["bold"]
+
+    margin_x = 14 * mm
+    top_margin = 14 * mm
+    bottom_margin = 14 * mm
+
+    # Áreas principais
+    x0 = margin_x
+    x1 = page_w - margin_x
+    w = x1 - x0
+
+    y = page_h - top_margin
+
+    # =========================
+    # HEADER (título + artista) + TOM/BPM à direita
+    # =========================
+    c.setFont(FONT_B, 16)
+    c.drawString(x0, y, (fields.get("title", "") or "")[:80])
+
+    # TOM/BPM (direita)
+    c.setFont(FONT_B, 11)
+    c.drawRightString(x1, y, f"TOM: {fields.get('tom','')}")
+    c.setFont(FONT_B, 11)
+    c.drawRightString(x1, y - 7 * mm, f"BPM: {fields.get('bpm','')}")
+
     y -= 7 * mm
 
-    c.setFont("Courier", 11)
+    c.setFont(FONT, 11)
     if fields.get("artist"):
-        c.drawString(margin_x, y, (fields["artist"] or "")[:80])
-    y -= 9 * mm
+        c.drawString(x0, y, (fields.get("artist", "") or "")[:110])
 
-    # TOM / BPM (direita)
-    c.setFont("Courier-Bold", 11)
-    c.drawRightString(page_w - margin_x, page_h - 14 * mm, f"TOM: {fields.get('tom','')}")
-    c.drawRightString(page_w - margin_x, page_h - 21 * mm, f"BPM: {fields.get('bpm','')}")
+    # linha separadora (igual preview)
+    y -= 6 * mm
+    c.setLineWidth(0.8)
+    c.line(x0, y, x1, y)
+    y -= 7 * mm
 
-    # OBS
-    c.setFont("Courier-Bold", 11)
-    c.drawString(margin_x, y, "OBS.:")
+    # =========================
+    # OBS.: (label + box com linhas top/bottom)
+    # =========================
+    c.setFont(FONT_B, 11)
+    c.drawString(x0, y, "OBS.:")
     y -= 5 * mm
 
-    c.setFont("Courier", 10)
-    obs_lines = _wrap_text(fields.get("obs", ""), width_chars=92)
-    for ln in obs_lines[:6]:
-        c.drawString(margin_x, y, ln)
-        y -= 4.5 * mm
-    y -= 2 * mm
+    obs_font = 10
+    c.setFont(FONT, obs_font)
 
-    # CIFRA (caixa)
+    # heurística por “chars” para wrap (mono)
+    # (aprox. 95 chars cabem bem nessa margem com fonte 10)
+    obs_lines = _wrap_text_lines(fields.get("obs", ""), max_chars=95)
+
+    # altura desejada (dinâmica, cap)
+    obs_line_h = obs_font * 1.25
+    obs_pad = 2 * mm
+    obs_max_lines = 6
+    obs_used_lines = min(len(obs_lines), obs_max_lines)
+    obs_box_h = obs_pad * 2 + obs_used_lines * (obs_line_h * 0.3528)  # pt->mm aprox? (vamos desenhar em pt, então melhor em pt)
+    # ↑ Vamos trabalhar em “pt” com o canvas; então vamos calcular em pt abaixo, mais correto.
+
+    # Melhor: define box em pt diretamente
+    obs_pad_pt = 6
+    obs_line_h_pt = obs_font * 1.25
+    obs_used_lines = max(1, min(len(obs_lines), obs_max_lines))
+    obs_box_h_pt = obs_pad_pt * 2 + obs_used_lines * obs_line_h_pt
+
+    # linhas superior/inferior do box
+    # (no preview é border-top/bottom)
+    obs_top_y = y
+    c.line(x0, obs_top_y, x1, obs_top_y)
+    obs_bottom_y = obs_top_y - obs_box_h_pt
+    c.line(x0, obs_bottom_y, x1, obs_bottom_y)
+
+    # escreve texto dentro
+    tx = c.beginText()
+    tx.setTextOrigin(x0, obs_top_y - obs_pad_pt - obs_font)
+    tx.setFont(FONT, obs_font)
+    tx.setLeading(obs_line_h_pt)
+
+    for ln in obs_lines[:obs_max_lines]:
+        tx.textLine(ln)
+    c.drawText(tx)
+
+    y = obs_bottom_y - 10  # gap
+
+    # =========================
+    # PREPARAÇÃO (vamos desenhar depois da CIFRA, mas precisamos reservar espaço)
+    # =========================
+    prep_font = 10
+    prep_lines = _wrap_text_lines(fields.get("prep", ""), max_chars=95)
+    prep_max_lines = 6
+    prep_used_lines = max(1, min(len(prep_lines), prep_max_lines))
+    prep_line_h_pt = prep_font * 1.25
+    prep_pad_pt = 6
+    prep_box_h_pt = prep_pad_pt * 2 + prep_used_lines * prep_line_h_pt
+
+    # Label PREPARAÇÃO ocupa ~ (11 + gap)
+    prep_label_h_pt = 11 + 8  # label + respiro
+
+    # =========================
+    # FOOTER PRÓXIMA (reservar)
+    # =========================
+    footer_h_pt = 34 * mm  # reserva semelhante ao preview
+    footer_top_y = bottom_margin + footer_h_pt  # linha de separação do footer
+
+    # =========================
+    # CIFRA (caixa ocupa o espaço que sobrar)
+    # =========================
+    # área disponível até antes da preparação + footer
+    cifra_top_y = y
+    cifra_bottom_limit = footer_top_y + prep_label_h_pt + prep_box_h_pt + 10  # 10 pt gap
+    cifra_h_pt = max(120, cifra_top_y - cifra_bottom_limit)  # mínimo
+
+    # caixa da cifra (retângulo com borda leve)
+    cifra_box_y = cifra_top_y
+    cifra_box_h = cifra_h_pt
+    cifra_box_w = w
+
+    c.setLineWidth(0.8)
+    c.rect(x0, cifra_box_y - cifra_box_h, cifra_box_w, cifra_box_h, stroke=1, fill=0)
+
+    # texto da cifra (auto-fit por largura e altura)
     cifra = fields.get("cifra_show", "") or ""
     cifra_lines = cifra.splitlines() if cifra else [""]
 
-    box_w = page_w - 2 * margin_x
-    box_h = 115 * mm
-    box_y_top = y
+    # padding interno
+    pad_left = 8
+    pad_top = 10
+    pad_right = 8
+    pad_bottom = 10
 
-    c.rect(margin_x, box_y_top - box_h, box_w, box_h, stroke=1, fill=0)
-
-    fs = _calc_courier_font_size_for_lines(
-        cifra_lines,
-        max_width_pt=box_w - 6*mm,
-        max_fs=11,
-        min_fs=6
+    fs = _calc_mono_font_size_fit(
+        lines=cifra_lines,
+        box_w_pt=cifra_box_w,
+        box_h_pt=cifra_box_h,
+        font_name=FONT,
+        max_fs=12,
+        min_fs=6,
+        padding_pt=(pad_left + pad_right + 4),
     )
-    line_h = fs * 1.25
 
-    text = c.beginText()
-    text.setTextOrigin(margin_x + 3*mm, box_y_top - 5*mm - fs)
-    text.setFont("Courier", fs)
+    leading = fs * 1.25
 
-    max_lines = int((box_h - 10*mm) / (line_h))
+    # quantas linhas cabem (segurança)
+    usable_h = max(1, cifra_box_h - pad_top - pad_bottom)
+    max_lines = int(usable_h / leading) if leading > 0 else len(cifra_lines)
+    max_lines = max(1, max_lines)
+
+    t = c.beginText()
+    t.setFont(FONT, fs)
+    t.setLeading(leading)
+    t.setTextOrigin(x0 + pad_left, cifra_box_y - pad_top - fs)
+
     for ln in cifra_lines[:max_lines]:
-        text.textLine(ln.rstrip("\n"))
-    c.drawText(text)
+        t.textLine((ln or "").rstrip("\n"))
+    c.drawText(t)
 
-    y = box_y_top - box_h - 6 * mm
+    y = (cifra_box_y - cifra_box_h) - 12  # gap
 
-    # PREPARAÇÃO
-    c.setFont("Courier-Bold", 11)
-    c.drawString(margin_x, y, "PREPARAÇÃO:")
+    # =========================
+    # PREPARAÇÃO (label + box com linhas top/bottom)
+    # =========================
+    c.setFont(FONT_B, 11)
+    c.drawString(x0, y, "PREPARAÇÃO:")
     y -= 5 * mm
 
-    c.setFont("Courier", 10)
-    prep_lines = _wrap_text(fields.get("prep", ""), width_chars=92)
-    for ln in prep_lines[:6]:
-        c.drawString(margin_x, y, ln)
-        y -= 4.5 * mm
+    # box (linhas sup/inf)
+    c.setFont(FONT, prep_font)
 
-    # Próxima (rodapé)
-    y_footer = 16 * mm
-    c.setLineWidth(1)
-    c.line(margin_x, y_footer + 18*mm, page_w - margin_x, y_footer + 18*mm)
+    prep_top_y = y
+    c.line(x0, prep_top_y, x1, prep_top_y)
+    prep_bottom_y = prep_top_y - prep_box_h_pt
+    c.line(x0, prep_bottom_y, x1, prep_bottom_y)
 
-    c.setFont("Courier-Bold", 11)
-    c.drawString(margin_x, y_footer + 12*mm, "PRÓXIMA:")
-    c.setFont("Courier", 10)
+    tp = c.beginText()
+    tp.setTextOrigin(x0, prep_top_y - prep_pad_pt - prep_font)
+    tp.setFont(FONT, prep_font)
+    tp.setLeading(prep_line_h_pt)
 
-    nxt = f'{fields.get("next_title","")}'
+    for ln in prep_lines[:prep_max_lines]:
+        tp.textLine(ln)
+    c.drawText(tp)
+
+    # =========================
+    # FOOTER PRÓXIMA
+    # =========================
+    # linha do footer
+    c.setLineWidth(0.8)
+    c.line(x0, footer_top_y, x1, footer_top_y)
+
+    c.setFont(FONT_B, 11)
+    c.drawString(x0, footer_top_y - 12, "PRÓXIMA:")
+
+    # texto da próxima
+    c.setFont(FONT, 10)
+    nxt = (fields.get("next_title", "") or "")
     if fields.get("next_artist"):
-        nxt += f' – {fields.get("next_artist","")}'
-    c.drawString(margin_x, y_footer + 6*mm, nxt[:110])
+        nxt += f" – {fields.get('next_artist','')}"
+    c.drawString(x0, footer_top_y - 24, nxt[:140])
 
-    c.setFont("Courier", 10)
-    c.drawRightString(page_w - margin_x, y_footer + 12*mm, f'TOM: {fields.get("next_tom","")}')
-    c.drawRightString(page_w - margin_x, y_footer + 6*mm, f'BPM: {fields.get("next_bpm","")}')
+    # TOM/BPM da próxima (direita)
+    c.setFont(FONT, 10)
+    c.drawRightString(x1, footer_top_y - 12, f"TOM: {fields.get('next_tom','')}")
+    c.drawRightString(x1, footer_top_y - 24, f"BPM: {fields.get('next_bpm','')}")
 
+
+# -----------------------------
+# PDF: Página atual
+# -----------------------------
 def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Preview"):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -2362,6 +2575,10 @@ def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Prev
 
     return pdf_bytes, f"{filename_base}.pdf"
 
+
+# -----------------------------
+# PDF: Setlist inteira
+# -----------------------------
 def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)

@@ -3041,7 +3041,8 @@ def main():
         page_icon="🎵",
         initial_sidebar_state="collapsed"
     )
-     st.markdown(
+
+    st.markdown(
     """
     <style>
 
@@ -3062,7 +3063,7 @@ def main():
     </style>
     """,
     unsafe_allow_html=True
-)
+    )
     # ---------- ESTADO INICIAL ----------
     init_state()
 

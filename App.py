@@ -363,7 +363,6 @@ def save_chord_to_drive(file_id: str, content: str):
     except Exception as e:
         st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
 
-
 # ==============================================================
 # 5) GITHUB – CSV BANCO + CSV SETLISTS
 # ==============================================================
@@ -411,7 +410,7 @@ def load_songs_df_from_github_csv() -> pd.DataFrame:
         st.error(f"Erro carregando CSV do GitHub: {e}")
         df = pd.DataFrame()
 
-    # normalize nomes de colunas (muito comum vir sem acento)
+    # normalize nomes de colunas
     df.columns = [str(c).strip() for c in df.columns]
     df = df.rename(columns={
         "Titulo": "Título",
@@ -430,14 +429,60 @@ def load_songs_df_from_github_csv() -> pd.DataFrame:
         "CifraSimplificadaId": "CifraSimplificadaID",
     })
 
-    # garante colunas esperadas
     expected = ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]
     for col in expected:
         if col not in df.columns:
             df[col] = ""
 
-    df = df.fillna("")
+    df = df[expected].fillna("")
+
+    if "Título" in df.columns:
+        df = df.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+
     return df
+
+
+def save_songs_df_to_github(df: pd.DataFrame):
+    token, owner, repo, branch, setlists_dir, songs_csv_url = _gh_secrets()
+
+    if not token:
+        st.error("Faltou configurar github.token em st.secrets.")
+        return
+
+    path = "Data/PDL_musicas.csv"
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+
+    expected = ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]
+    for col in expected:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[expected].fillna("")
+
+    if "Título" in df.columns:
+        df = df.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+
+    csv_text = df.to_csv(index=False)
+    content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
+
+    sha = None
+    r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
+    if r0.status_code == 200:
+        sha = r0.json().get("sha")
+
+    msg = f"Update songs database ({datetime.utcnow().isoformat()}Z)"
+    payload = {"message": msg, "content": content_b64, "branch": branch}
+    if sha:
+        payload["sha"] = sha
+
+    r = requests.put(api_url, headers=_gh_headers(token), data=json.dumps(payload), timeout=20)
+
+    if r.status_code not in (200, 201):
+        st.error(f"Erro ao salvar banco de músicas no GitHub: {r.status_code} - {r.text}")
+    else:
+        load_songs_df_from_github_csv.clear()
+        st.session_state.songs_df = load_songs_df_from_github_csv()
+        st.success("Banco de músicas salvo no GitHub com sucesso.")
 
 
 def list_setlist_files() -> list:
@@ -494,7 +539,6 @@ def save_setlist_df_to_github(setlist_name: str, df: pd.DataFrame):
     csv_text = df.to_csv(index=False)
     content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
 
-    # sha se existir
     sha = None
     r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
     if r0.status_code == 200:
@@ -1224,16 +1268,104 @@ def render_setlist_editor_tree():
     # Editor lateral do item
     # ==========================================================
     render_selected_item_editor()
-    
+
 # ==============================================================
 # 12) BANCO DE MÚSICAS (GitHub CSV) + GERAR TXT NO DRIVE
 # ==============================================================
 
 def render_song_database():
-    st.subheader("Banco de músicas (GitHub CSV)")
-    df = st.session_state.songs_df
+    st.subheader("Banco de músicas")
 
-    st.dataframe(df, use_container_width=True, height=240)
+    if "songs_editor_df" not in st.session_state:
+        df_init = st.session_state.songs_df.copy().fillna("")
+        if "Título" in df_init.columns:
+            df_init = df_init.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+        st.session_state.songs_editor_df = df_init
+
+    top_a, top_b = st.columns(2)
+
+    with top_a:
+        if st.button("➕ Adicionar nova música", use_container_width=True, key="btn_add_song_row"):
+            df_edit = st.session_state.songs_editor_df.copy()
+            new_row = {
+                "Título": "",
+                "Artista": "",
+                "Tom_Original": "",
+                "BPM": "",
+                "CifraDriveID": "",
+                "CifraSimplificadaID": "",
+            }
+            df_edit = pd.concat([df_edit, pd.DataFrame([new_row])], ignore_index=True)
+            st.session_state.songs_editor_df = df_edit
+            st.rerun()
+
+    with top_b:
+        if st.button("🔄 Recarregar do GitHub", use_container_width=True, key="btn_reload_songs"):
+            load_songs_df_from_github_csv.clear()
+            df_reload = load_songs_df_from_github_csv().fillna("")
+            if "Título" in df_reload.columns:
+                df_reload = df_reload.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+            st.session_state.songs_df = df_reload
+            st.session_state.songs_editor_df = df_reload.copy()
+            st.rerun()
+
+    st.caption("Você pode editar diretamente a tabela abaixo e depois salvar no GitHub.")
+
+    df_editable = st.session_state.songs_editor_df.copy().fillna("")
+
+    edited_df = st.data_editor(
+        df_editable,
+        use_container_width=True,
+        height=380,
+        num_rows="dynamic",
+        key="songs_data_editor",
+        column_config={
+            "Título": st.column_config.TextColumn("Título", required=True),
+            "Artista": st.column_config.TextColumn("Artista"),
+            "Tom_Original": st.column_config.TextColumn("Tom_Original"),
+            "BPM": st.column_config.TextColumn("BPM"),
+            "CifraDriveID": st.column_config.TextColumn("CifraDriveID"),
+            "CifraSimplificadaID": st.column_config.TextColumn("CifraSimplificadaID"),
+        },
+    )
+
+    edited_df = edited_df.fillna("")
+
+    if "Título" in edited_df.columns:
+        edited_df = edited_df.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+
+    st.session_state.songs_editor_df = edited_df
+
+    save_col1, save_col2 = st.columns([1, 2])
+
+    with save_col1:
+        if st.button("💾 Salvar banco de músicas", use_container_width=True, key="btn_save_songs_db"):
+            df_to_save = st.session_state.songs_editor_df.copy().fillna("")
+
+            # remove linhas totalmente vazias
+            df_to_save = df_to_save[
+                ~(
+                    df_to_save["Título"].astype(str).str.strip().eq("") &
+                    df_to_save["Artista"].astype(str).str.strip().eq("") &
+                    df_to_save["Tom_Original"].astype(str).str.strip().eq("") &
+                    df_to_save["BPM"].astype(str).str.strip().eq("") &
+                    df_to_save["CifraDriveID"].astype(str).str.strip().eq("") &
+                    df_to_save["CifraSimplificadaID"].astype(str).str.strip().eq("")
+                )
+            ].copy()
+
+            if "Título" in df_to_save.columns:
+                df_to_save = df_to_save.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+
+            save_songs_df_to_github(df_to_save)
+            st.session_state.songs_df = df_to_save.copy()
+            st.session_state.songs_editor_df = df_to_save.copy()
+            st.rerun()
+
+    with save_col2:
+        st.caption("As músicas são organizadas automaticamente em ordem alfabética pelo título.")
+
+    st.markdown("---")
 
     with st.expander("Gerar TXT no Drive (para depois colar os IDs no CSV)", expanded=False):
         c1, c2 = st.columns(2)
@@ -1321,7 +1453,7 @@ def render_song_database():
 
                 st.success("TXT criado no Drive.")
                 st.info(
-                    f"Agora edite o CSV do banco e cole esses IDs:\n\n"
+                    f"Agora você pode colar esses IDs diretamente na tabela acima:\n\n"
                     f"- CifraDriveID: {final_cifra_id}\n"
                     f"- CifraSimplificadaID: {final_simpl_id}\n\n"
                     f"(Tom_Original: {tom_original} | BPM: {bpm})"

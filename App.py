@@ -560,13 +560,23 @@ def init_state():
 
     if "selected_block_idx" not in st.session_state:
         st.session_state.selected_block_idx = None
+
     if "selected_item_idx" not in st.session_state:
         st.session_state.selected_item_idx = None
 
     if "new_song_cifra_original" not in st.session_state:
         st.session_state.new_song_cifra_original = ""
+
     if "new_song_cifra_simplificada" not in st.session_state:
         st.session_state.new_song_cifra_simplificada = ""
+
+    # ✅ nova navegação lateral
+    if "app_section" not in st.session_state:
+        st.session_state.app_section = "setlist"
+
+    # ✅ estado do fullscreen
+    if "pdl_fullscreen" not in st.session_state:
+        st.session_state.pdl_fullscreen = False
 
 
 # ==============================================================
@@ -2636,69 +2646,33 @@ def render_home():
         else:
             st.info("Nenhuma setlist encontrada ainda em Data/Setlists.")
 
-    
 # ==============================================================
-# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES com TODAS as páginas)
+# 14.5) TELA SETLIST
 # ==============================================================
 
-def main():
-    st.set_page_config(page_title="PDL Setlist", layout="wide", page_icon="🎵")
-
-    # ---------- ESTADO INICIAL ----------
-    init_state()
-
-    # ---------- TELA HOME ----------
-    if st.session_state.screen == "home":
-        render_home()
-        return
-
-    # ---------- CABEÇALHO ----------
-    top_left, top_right = st.columns([3, 1])
-
-    with top_left:
-        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
-        st.session_state.setlist_name = st.text_input(
-            "Nome do setlist",
-            value=st.session_state.setlist_name,
-            label_visibility="collapsed",
-        )
-
-    with top_right:
-        if st.button("🏠 Voltar à tela inicial", use_container_width=True):
-            st.session_state.screen = "home"
-            st.rerun()
-
-        if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True):
-            save_current_setlist_to_github()
-
-    # ---------- LAYOUT PRINCIPAL ----------
+def render_setlist_screen():
     left_col, right_col = st.columns([1.1, 1])
 
     # ==========================================================
-    # COLUNA ESQUERDA — EDITORES
+    # COLUNA ESQUERDA — EDITOR DA SETLIST
     # ==========================================================
     with left_col:
         st.subheader("Editor de Setlist (modo árvore)")
         render_setlist_editor_tree()
 
-        st.markdown("---")
-        render_song_database()
-
-        render_gemini_ocr_section()
-
     # ==========================================================
-    # COLUNA DIREITA — PREVIEW (COM FULLSCREEN SLIDES)
+    # COLUNA DIREITA — PREVIEW / PDF / FULLSCREEN
     # ==========================================================
     with right_col:
         st.subheader("Preview")
 
         blocks = st.session_state.blocks
+
         # ==========================================================
-        # ✅ BOTÕES PDF (IGUAL AO PREVIEW)
+        # BOTÕES PDF
         # ==========================================================
         pdf_col1, pdf_col2 = st.columns(2)
 
-        # PDF da setlist inteira
         with pdf_col1:
             if blocks:
                 pdf_all_bytes, pdf_all_name = make_pdf_for_full_setlist(
@@ -2714,27 +2688,26 @@ def main():
                     key="dl_pdf_full"
                 )
 
-        # PDF da página atual (vai funcionar depois que current_item for definido)
         with pdf_col2:
             st.caption("PDF da página atual aparece após selecionar uma música (ou usar 👁).")
 
-        # estado do fullscreen (persistente)
-        if "pdl_fullscreen" not in st.session_state:
-            st.session_state.pdl_fullscreen = False
-
-        # botões de controle
+        # ==========================================================
+        # BOTÕES FULLSCREEN
+        # ==========================================================
         b1, b2 = st.columns([1, 1])
+
         with b1:
             if st.button("🖥️ Fullscreen (slides / swipe)", use_container_width=True, key="btn_fs_on"):
                 st.session_state.pdl_fullscreen = True
                 st.rerun()
+
         with b2:
             if st.button("⬅️ Voltar", use_container_width=True, key="btn_fs_off"):
                 st.session_state.pdl_fullscreen = False
                 st.rerun()
 
         # --------------------------------------------------
-        # Seleção do "current_item" (para preview normal)
+        # Seleção do current_item
         # --------------------------------------------------
         current_item = None
         current_block_name = ""
@@ -2752,7 +2725,7 @@ def main():
                 cur_block_idx = sel_b
                 cur_item_idx = sel_i
 
-        # PRIORIDADE 2 — ITEM MARCADO COM 👁 (current_item)
+        # PRIORIDADE 2 — ITEM MARCADO COM 👁
         if current_item is None:
             cur = st.session_state.current_item
             if cur is not None:
@@ -2777,7 +2750,9 @@ def main():
             st.info("Adicione músicas ao setlist para ver o preview.")
             return
 
-        # PDF da página atual (depois que sabemos o item atual)
+        # ==========================================================
+        # PDF DA PÁGINA ATUAL
+        # ==========================================================
         if current_item is not None and cur_block_idx is not None and cur_item_idx is not None:
             pdf_one_bytes, pdf_one_name = make_pdf_for_single_item(
                 current_item,
@@ -2796,11 +2771,16 @@ def main():
             )
 
         # --------------------------------------------------
-        # MODO NORMAL (preview único)
+        # MODO NORMAL
         # --------------------------------------------------
         if not st.session_state.pdl_fullscreen:
             footer_mode, footer_next_item = get_footer_context(blocks, cur_block_idx, cur_item_idx)
-            html_current = build_sheet_page_html(current_item, footer_mode, footer_next_item, current_block_name)
+            html_current = build_sheet_page_html(
+                current_item,
+                footer_mode,
+                footer_next_item,
+                current_block_name
+            )
 
             st.components.v1.html(
                 html_current,
@@ -2810,10 +2790,8 @@ def main():
             return
 
         # --------------------------------------------------
-        # MODO FULLSCREEN (slides) — ✅ TODAS as páginas da setlist
+        # MODO FULLSCREEN
         # --------------------------------------------------
-
-        # 1) “achata” todos os itens em ordem (bloco por bloco)
         flat = []
         for b_idx, block in enumerate(blocks):
             items = block.get("items", [])
@@ -2824,7 +2802,6 @@ def main():
             st.info("Sem itens para exibir em fullscreen.")
             return
 
-        # 2) define o índice inicial (mesmo item que está no preview)
         start_index = 0
         if cur_block_idx is not None and cur_item_idx is not None:
             for k, (b, i, _, _) in enumerate(flat):
@@ -2832,7 +2809,6 @@ def main():
                     start_index = k
                     break
 
-        # 3) monta slides e títulos
         slides = []
         titles = []
 
@@ -2851,7 +2827,6 @@ def main():
             slides.append(html)
             titles.append(_pretty_title(it))
 
-        # 4) renderiza o viewer (com fullscreen via requestFullscreen dentro do HTML)
         fullscreen_slides_viewer(
             slides=slides,
             titles=titles,
@@ -2859,6 +2834,119 @@ def main():
             height=700
         )
 
+# ==============================================================
+# 14.6) TELA BANCO DE MÚSICAS
+# ==============================================================
+
+def render_song_database_screen():
+    st.subheader("Banco de Músicas")
+
+    st.caption("Aqui você pode visualizar o banco atual e gerenciar os arquivos TXT das cifras no Google Drive.")
+
+    render_song_database()
+
+# ==============================================================
+# 14.7) TELA GERENCIAMENTO DE CIFRAS
+# ==============================================================
+
+def render_chord_management_screen():
+    st.subheader("Gerenciamento de Cifras")
+
+    st.caption("Use o Gemini AI para transcrever imagens de cifras em texto TXT.")
+
+    render_gemini_ocr_section()
+
+# ==============================================================
+# 14.8) SIDEBAR / NAVEGAÇÃO
+# ==============================================================
+
+def render_sidebar_navigation():
+    with st.sidebar:
+        st.markdown("## 🎵 PDL Setlist")
+
+        st.markdown("---")
+        st.markdown(f"**Setlist atual:**")
+        st.markdown(f"`{st.session_state.setlist_name}`")
+
+        st.markdown("---")
+        selected_section = st.radio(
+            "Navegação",
+            options=["setlist", "banco", "cifras"],
+            format_func=lambda x: {
+                "setlist": f"Setlist — {st.session_state.setlist_name}",
+                "banco": "Banco de Músicas",
+                "cifras": "Gerenciamento de Cifras",
+            }[x],
+            index=["setlist", "banco", "cifras"].index(
+                st.session_state.get("app_section", "setlist")
+            ),
+            key="sidebar_app_section_radio"
+        )
+
+        st.session_state.app_section = selected_section
+
+        st.markdown("---")
+
+        if st.button("🏠 Voltar à tela inicial", use_container_width=True, key="sidebar_go_home"):
+            st.session_state.screen = "home"
+            st.rerun()
+
+        if st.button("💾 Salvar setlist (GitHub CSV)", use_container_width=True, key="sidebar_save_setlist"):
+            save_current_setlist_to_github()
+    
+# ==============================================================
+# 15) MAIN  (SEÇÃO INTEIRA — ✅ FULLSCREEN SLIDES com TODAS as páginas)
+# ==============================================================
+
+# ==============================================================
+# 15) MAIN
+# ==============================================================
+
+def main():
+    st.set_page_config(
+        page_title="PDL Setlist",
+        layout="wide",
+        page_icon="🎵",
+        initial_sidebar_state="collapsed"
+    )
+
+    # ---------- ESTADO INICIAL ----------
+    init_state()
+
+    # ---------- TELA HOME ----------
+    if st.session_state.screen == "home":
+        render_home()
+        return
+
+    # ---------- SIDEBAR ----------
+    render_sidebar_navigation()
+
+    # ---------- CABEÇALHO ----------
+    top_left, top_right = st.columns([3, 1])
+
+    with top_left:
+        st.markdown(f"### Setlist: {st.session_state.setlist_name}")
+        st.session_state.setlist_name = st.text_input(
+            "Nome do setlist",
+            value=st.session_state.setlist_name,
+            label_visibility="collapsed",
+            key="main_setlist_name_input"
+        )
+
+    with top_right:
+        st.info(f"Seção atual: **{ {'setlist':'Setlist', 'banco':'Banco de Músicas', 'cifras':'Gerenciamento de Cifras'}[st.session_state.app_section] }**")
+
+    st.markdown("---")
+
+    # ---------- ROTEAMENTO DAS TELAS ----------
+    if st.session_state.app_section == "setlist":
+        render_setlist_screen()
+
+    elif st.session_state.app_section == "banco":
+        render_song_database_screen()
+
+    elif st.session_state.app_section == "cifras":
+        render_chord_management_screen()
 
 # ==============================================================
 # EXECUÇÃO

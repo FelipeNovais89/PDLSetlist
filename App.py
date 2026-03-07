@@ -3049,8 +3049,8 @@ def main():
     /* BACKGROUND IMAGE */
     .stApp {
         background-image: linear-gradient(
-            rgba(0,0,0,0.85),
-            rgba(0,0,0,0.95)
+            rgba(0,0,0,0.80),
+            rgba(0,0,0,0.85)
         ),
         url("https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/main/Data/IMG-20260202-WA0019.jpg");
 

@@ -3041,7 +3041,28 @@ def main():
         page_icon="🎵",
         initial_sidebar_state="collapsed"
     )
+st.markdown(
+    """
+    <style>
 
+    /* BACKGROUND IMAGE */
+    .stApp {
+        background-image: linear-gradient(
+            rgba(0,0,0,0.75),
+            rgba(0,0,0,0.85)
+        ),
+        url("https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/main/Data/IMG-20260202-WA0019.jpg");
+
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
     # ---------- ESTADO INICIAL ----------
     init_state()
 

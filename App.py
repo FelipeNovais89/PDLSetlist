@@ -2748,7 +2748,13 @@ def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
 # ==============================================================
 
 def render_home():
-    st.title("PDL Setlist")
+       
+    st.image(
+    "https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/main/Data/file_000000009f20720aa44d499e2a2763b0.png",
+    use_container_width=True
+    )
+
+    st.markdown("---")
 
     setlist_files = list_setlist_files()
     setlist_names = [f.replace(".csv", "").replace("_", " ") for f in setlist_files]

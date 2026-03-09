@@ -968,7 +968,7 @@ def render_selected_item_editor():
         
 
 # ==============================================================
-# 11.5) EDITOR EM ÁRVORE (SETLIST) — versão ajustada visualmente
+# 11.5) EDITOR EM ÁRVORE (SETLIST) — versão estável + layout melhorado
 # ==============================================================
 
 def render_setlist_editor_tree():
@@ -977,18 +977,35 @@ def render_setlist_editor_tree():
 
     st.markdown("### Estrutura da Setlist (modo árvore)")
 
-    # CSS para melhorar os botões das músicas
+    # ----------------------------------------------------------
+    # CSS dos botões / cards
+    # ----------------------------------------------------------
     st.markdown("""
     <style>
-    div[data-testid="stButton"] button.song-item-btn {
-        min-height: 92px !important;
+    div[data-testid="stButton"] > button {
+        border-radius: 16px !important;
+    }
+
+    .music-btn div[data-testid="stButton"] > button {
+        min-height: 108px !important;
+        white-space: pre-line !important;
         text-align: left !important;
         justify-content: flex-start !important;
-        white-space: pre-line !important;
-        line-height: 1.35 !important;
-        padding-top: 12px !important;
-        padding-bottom: 12px !important;
+        align-items: center !important;
+        line-height: 1.45 !important;
         font-size: 15px !important;
+        padding: 14px 18px !important;
+    }
+
+    .block-add div[data-testid="stButton"] > button {
+        min-height: 52px !important;
+        font-size: 18px !important;
+    }
+
+    .mini-btn div[data-testid="stButton"] > button {
+        min-height: 52px !important;
+        padding: 0 !important;
+        font-size: 18px !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -998,114 +1015,135 @@ def render_setlist_editor_tree():
     # ==========================================================
     for b_idx, block in enumerate(blocks):
 
-        block_title = f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}"
-        items = block.get("items", [])
+        block_title = block.get("name", f"Bloco {b_idx+1}")
 
-        with st.expander(block_title, expanded=False):
+        with st.expander(
+            f"Bloco {b_idx + 1}: {block_title}",
+            expanded=False
+        ):
 
             # --------------------------------------------------
             # Cabeçalho do bloco
-            # Agora SEM os botões dentro do input
             # --------------------------------------------------
-            name_col, up_col, down_col, del_col = st.columns([7, 1, 1, 1])
+            head1, head2, head3, head4 = st.columns([7, 1, 1, 1])
 
-            block["name"] = name_col.text_input(
+            block["name"] = head1.text_input(
                 "Nome do bloco",
                 value=block.get("name", f"Bloco {b_idx+1}"),
                 key=f"blk_name_{b_idx}",
                 label_visibility="collapsed",
             )
 
-            if up_col.button("⬆️", key=f"blk_up_{b_idx}"):
-                move_block(b_idx, -1)
-                st.rerun()
+            with head2:
+                st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                if st.button("⬆️", key=f"blk_up_{b_idx}", use_container_width=True):
+                    move_block(b_idx, -1)
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            if down_col.button("⬇️", key=f"blk_down_{b_idx}"):
-                move_block(b_idx, 1)
-                st.rerun()
+            with head3:
+                st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                if st.button("⬇️", key=f"blk_down_{b_idx}", use_container_width=True):
+                    move_block(b_idx, 1)
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            if del_col.button("❎", key=f"blk_del_{b_idx}"):
-                delete_block(b_idx)
-                st.rerun()
+            with head4:
+                st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                if st.button("❎", key=f"blk_del_{b_idx}", use_container_width=True):
+                    delete_block(b_idx)
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("---")
 
             # ==================================================
             # ITENS DO BLOCO
             # ==================================================
-            for i, item in enumerate(items):
+            for i, item in enumerate(block.get("items", [])):
 
-                col_label, col_btns = st.columns([8.7, 2.3])
+                col_label, col_btns = st.columns([8.6, 2.4])
 
-                # ---------- label da música / pausa ----------
+                # ---------- label ----------
                 if item.get("type") == "music":
                     title = (item.get("title") or "Nova música").strip()
                     artist = (item.get("artist") or "").strip()
                     tom = (item.get("tom") or item.get("tom_original") or "").strip()
-                    bpm = (item.get("bpm") or "").strip()
+                    bpm = str(item.get("bpm") or "").strip()
 
-                    label = f"🎵 {title}\n"
-                    label += f"      {artist if artist else '-'}\n"
+                    label = (
+                        f"🎵 {title}\n"
+                        f"{artist if artist else '-'}\n"
+                        f"Tom: {tom if tom else '-'} | BPM: {bpm if bpm else '-'}"
+                    )
 
-                    meta_parts = []
-                    meta_parts.append(f"Tom: {tom if tom else '-'}")
-                    meta_parts.append(f"BPM: {bpm if bpm else '-'}")
-
-                    label += f"      {' | '.join(meta_parts)}"
+                    with col_label:
+                        st.markdown('<div class="music-btn">', unsafe_allow_html=True)
+                        if st.button(
+                            label,
+                            key=f"sel_item_{b_idx}_{i}",
+                            use_container_width=True
+                        ):
+                            st.session_state.selected_block_idx = b_idx
+                            st.session_state.selected_item_idx = i
+                            st.session_state.current_item = (b_idx, i)
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
                 else:
-                    pause_label = item.get("label", "Pausa")
-                    label = f"⏸ {pause_label}"
+                    pause_label = f"⏸ {item.get('label', 'Pausa')}"
 
-                # selecionar item
-                btn = col_label.button(
-                    label,
-                    key=f"sel_item_{b_idx}_{i}",
-                    use_container_width=True,
-                )
+                    with col_label:
+                        st.markdown('<div class="music-btn">', unsafe_allow_html=True)
+                        if st.button(
+                            pause_label,
+                            key=f"sel_item_{b_idx}_{i}",
+                            use_container_width=True
+                        ):
+                            st.session_state.selected_block_idx = b_idx
+                            st.session_state.selected_item_idx = i
+                            st.session_state.current_item = (b_idx, i)
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
-                # aplica classe visual depois do botão existir
-                st.markdown("""
-                <script>
-                const buttons = window.parent.document.querySelectorAll('button[kind]');
-                buttons.forEach(btn => {
-                    if (btn.innerText.includes("🎵") || btn.innerText.includes("⏸")) {
-                        btn.classList.add("song-item-btn");
-                    }
-                });
-                </script>
-                """, unsafe_allow_html=True)
-
-                if btn:
-                    st.session_state.selected_block_idx = b_idx
-                    st.session_state.selected_item_idx = i
-                    st.session_state.current_item = (b_idx, i)
-                    st.rerun()
-
-                # ---------- botões laterais ----------
+                # ---------- botões ----------
                 with col_btns:
-                    cu, cd, cx, cp = st.columns(4)
+                    c_up, c_down, c_del, c_prev = st.columns(4)
 
-                    if cu.button("⬆️", key=f"it_up_{b_idx}_{i}"):
-                        move_item(b_idx, i, -1)
-                        st.rerun()
+                    with c_up:
+                        st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                        if st.button("⬆️", key=f"it_up_{b_idx}_{i}", use_container_width=True):
+                            move_item(b_idx, i, -1)
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
-                    if cd.button("⬇️", key=f"it_down_{b_idx}_{i}"):
-                        move_item(b_idx, i, 1)
-                        st.rerun()
+                    with c_down:
+                        st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                        if st.button("⬇️", key=f"it_down_{b_idx}_{i}", use_container_width=True):
+                            move_item(b_idx, i, 1)
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
-                    if cx.button("❎", key=f"it_del_{b_idx}_{i}"):
-                        delete_item(b_idx, i)
-                        st.rerun()
+                    with c_del:
+                        st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                        if st.button("❎", key=f"it_del_{b_idx}_{i}", use_container_width=True):
+                            delete_item(b_idx, i)
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
-                    if cp.button("👁", key=f"it_prev_{b_idx}_{i}"):
-                        st.session_state.current_item = (b_idx, i)
-                        st.rerun()
+                    with c_prev:
+                        st.markdown('<div class="mini-btn">', unsafe_allow_html=True)
+                        if st.button("👁", key=f"it_prev_{b_idx}_{i}", use_container_width=True):
+                            st.session_state.current_item = (b_idx, i)
+                            st.session_state.selected_block_idx = b_idx
+                            st.session_state.selected_item_idx = i
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("---")
 
             # ==================================================
-            # BOTÕES ADICIONAR ITENS NO BLOCO
+            # BOTÕES ADICIONAR DENTRO DO BLOCO
             # ==================================================
             col_add_mus, col_add_pause = st.columns(2)
 
@@ -1119,13 +1157,13 @@ def render_setlist_editor_tree():
                 st.rerun()
 
     # ==========================================================
-    # BOTÃO ADICIONAR BLOCO — AGORA EMBAIXO DOS BLOCOS
+    # BOTÃO GLOBAL ADICIONAR BLOCO (EMBAIXO DOS BLOCOS)
     # ==========================================================
-    st.markdown("---")
-
+    st.markdown('<div class="block-add">', unsafe_allow_html=True)
     if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global_bottom"):
         st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
     # MODAL FORA DO LOOP
@@ -1139,6 +1177,7 @@ def render_setlist_editor_tree():
     # Editor lateral do item
     # ==========================================================
     render_selected_item_editor()
+
 
 # ==============================================================
 # 12) BANCO DE MÚSICAS (GitHub CSV) + GERAR TXT NO DRIVE

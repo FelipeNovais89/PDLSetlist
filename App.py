@@ -987,7 +987,7 @@ def render_setlist_editor_tree():
     }
 
     .music-btn div[data-testid="stButton"] > button {
-        min-height: 108px !important;
+        min-height: 120px !important;
         white-space: pre-line !important;
         text-align: left !important;
         justify-content: flex-start !important;

@@ -965,6 +965,158 @@ def render_selected_item_editor():
             key=f"pause_label_{b_idx}_{i_idx}",
         )
 
+# ==============================================================
+# 11) MODAL — Song Picker
+# ==============================================================
+
+def _song_uid(row, fallback_i: int) -> str:
+    """
+    Gera um UID estável e único para cada música.
+    Preferência: índice do DataFrame (row.name).
+    """
+    try:
+        return str(row.name)
+    except Exception:
+        return str(fallback_i)
+
+
+def open_song_picker_dialog(block_idx: int, songs_df: pd.DataFrame):
+    """
+    Abre um modal (st.dialog) com lista de músicas (checkbox),
+    busca e botões de ação. A lista tem scroll próprio.
+    """
+
+    if "song_picker_nonce" not in st.session_state:
+        st.session_state.song_picker_nonce = 0
+
+    if st.session_state.get("song_picker_open", False) and st.session_state.song_picker_nonce == 0:
+        st.session_state.song_picker_nonce = 1
+
+    nonce = st.session_state.song_picker_nonce
+
+    sel_key = f"song_picker_selected_{block_idx}"
+    if sel_key not in st.session_state:
+        st.session_state[sel_key] = set()
+
+    @st.dialog("Adicionar músicas ao bloco", width="large")
+    def _dialog():
+        st.markdown("Marque as músicas que deseja adicionar neste bloco.")
+
+        q = st.text_input(
+            "Buscar",
+            placeholder="Digite parte do título ou artista…",
+            key=f"sp_search_{nonce}_{block_idx}",
+        ).strip().lower()
+
+        df_local = songs_df.copy()
+
+        if not df_local.empty:
+            df_local["__t"] = df_local["Título"].astype(str)
+            df_local["__a"] = df_local["Artista"].astype(str)
+
+            if q:
+                mask = (
+                    df_local["__t"].str.lower().str.contains(q, na=False)
+                    | df_local["__a"].str.lower().str.contains(q, na=False)
+                )
+                df_local = df_local[mask]
+
+        # ordena alfabeticamente
+        if not df_local.empty and "Título" in df_local.columns:
+            df_local = df_local.sort_values(
+                "Título",
+                key=lambda s: s.astype(str).str.lower()
+            )
+
+        list_box = st.container(height=360, border=True)
+
+        selected_set = set(st.session_state[sel_key])
+
+        with list_box:
+            if df_local.empty:
+                st.info("Nenhuma música encontrada.")
+            else:
+                for j, (_, row) in enumerate(df_local.iterrows()):
+                    titulo = str(row.get("Título", "")).strip()
+                    artista = str(row.get("Artista", "")).strip()
+                    tom = str(row.get("Tom_Original", "")).strip()
+
+                    if not titulo:
+                        continue
+
+                    label = f"{titulo} – {artista}" if artista else titulo
+                    if tom:
+                        label += f" ({tom})"
+
+                    uid = _song_uid(row, j)
+                    cb_key = f"sp_cb_{nonce}_{block_idx}_{uid}"
+
+                    checked = uid in selected_set
+                    val = st.checkbox(label, value=checked, key=cb_key)
+
+                    if val:
+                        selected_set.add(uid)
+                    else:
+                        selected_set.discard(uid)
+
+        st.session_state[sel_key] = selected_set
+
+        st.markdown("---")
+        c1, c2, c3 = st.columns([1, 1, 2])
+
+        if c1.button("Limpar seleção", use_container_width=True, key=f"sp_clear_{nonce}_{block_idx}"):
+            st.session_state[sel_key] = set()
+            st.rerun()
+
+        if c2.button("Cancelar", use_container_width=True, key=f"sp_cancel_{nonce}_{block_idx}"):
+            st.session_state.song_picker_open = False
+            st.session_state.song_picker_block_idx = None
+            st.rerun()
+
+        if c3.button("Adicionar selecionadas", use_container_width=True, key=f"sp_add_{nonce}_{block_idx}"):
+            chosen = st.session_state[sel_key]
+
+            if not chosen:
+                st.warning("Nenhuma música selecionada.")
+                return
+
+            df_all = songs_df.copy()
+
+            for uid in chosen:
+                try:
+                    row = df_all.loc[int(uid)] if uid.isdigit() else df_all.loc[uid]
+                except Exception:
+                    try:
+                        row = df_all.loc[uid]
+                    except Exception:
+                        continue
+
+                cifra_id = str(row.get("CifraDriveID", "")).strip()
+                cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
+
+                new_item = {
+                    "type": "music",
+                    "title": row.get("Título", ""),
+                    "artist": row.get("Artista", ""),
+                    "tom_original": row.get("Tom_Original", ""),
+                    "tom": row.get("Tom_Original", ""),
+                    "bpm": row.get("BPM", ""),
+                    "cifra_id": cifra_id,
+                    "cifra_simplificada_id": cifra_simplificada_id,
+                    "use_simplificada": False,
+                    "text": "",
+                    "obs": "",
+                    "preparacao": "",
+                }
+
+                st.session_state.blocks[block_idx]["items"].append(new_item)
+
+            st.session_state[sel_key] = set()
+            st.session_state.song_picker_open = False
+            st.session_state.song_picker_block_idx = None
+            st.rerun()
+
+    _dialog()
         
 
 # ==============================================================

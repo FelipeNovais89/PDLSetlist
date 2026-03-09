@@ -987,14 +987,25 @@ def render_setlist_editor_tree():
     }
 
     .music-btn div[data-testid="stButton"] > button {
-        min-height: 120px !important;
-        white-space: pre-line !important;
+        min-height: 125px !important;
+        height: 125px !important;
+        white-space: normal !important;
         text-align: left !important;
         justify-content: flex-start !important;
         align-items: center !important;
-        line-height: 1.45 !important;
+        line-height: 1.35 !important;
         font-size: 15px !important;
-        padding: 14px 18px !important;
+        padding: 14px 16px !important;
+        overflow: hidden !important;
+    }
+
+    .music-btn div[data-testid="stButton"] > button p,
+    .music-btn div[data-testid="stButton"] > button span,
+    .music-btn div[data-testid="stButton"] > button div {
+        white-space: pre-line !important;
+        line-height: 1.35 !important;
+        text-align: left !important;
+        width: 100% !important;
     }
 
     .block-add div[data-testid="stButton"] > button {
@@ -1072,8 +1083,8 @@ def render_setlist_editor_tree():
                     bpm = str(item.get("bpm") or "").strip()
 
                     label = (
-                        f"🎵 {title}\n"
-                        f"{artist if artist else '-'}\n"
+                        f"🎵 {title}  \n"
+                        f"{artist if artist else '-'}  \n"
                         f"Tom: {tom if tom else '-'} | BPM: {bpm if bpm else '-'}"
                     )
 

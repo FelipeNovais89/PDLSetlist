@@ -968,170 +968,7 @@ def render_selected_item_editor():
         
 
 # ==============================================================
-# 11) MODAL — Song Picker (popup com busca + checkbox + scroll SÓ na lista)
-# ==============================================================
-# ==============================================================
-# 11.5) MODAL: Song Picker (checkbox list + busca + scroll só na lista)
-# ==============================================================
-
-def _song_uid(row, fallback_i: int) -> str:
-    """
-    Gera um UID estável e único para cada música.
-    Preferência: índice do DataFrame (row.name).
-    """
-    try:
-        # row.name costuma ser o índice do df
-        return str(row.name)
-    except Exception:
-        return str(fallback_i)
-
-
-def open_song_picker_dialog(block_idx: int, songs_df: pd.DataFrame):
-    """
-    Abre um modal (st.dialog) com lista de músicas (checkbox),
-    busca e botões de ação. A lista tem scroll próprio.
-    """
-
-    # nonce para garantir keys únicas mesmo que abra/feche várias vezes
-    if "song_picker_nonce" not in st.session_state:
-        st.session_state.song_picker_nonce = 0
-    # Importantíssimo: incrementar quando ABRE (idealmente no clique do botão),
-    # mas se não incrementou lá, incrementa aqui 1x por abertura.
-    if st.session_state.get("song_picker_open", False) and st.session_state.song_picker_nonce == 0:
-        st.session_state.song_picker_nonce = 1
-
-    nonce = st.session_state.song_picker_nonce
-
-    # seleção persistente no session_state
-    sel_key = f"song_picker_selected_{block_idx}"
-    if sel_key not in st.session_state:
-        st.session_state[sel_key] = set()
-
-    @st.dialog("Adicionar músicas ao bloco", width="large")
-    def _dialog():
-        st.markdown("Marque as músicas que deseja adicionar neste bloco.")
-
-        # busca (key com nonce)
-        q = st.text_input(
-            "Buscar",
-            placeholder="Digite parte do título ou artista…",
-            key=f"sp_search_{nonce}_{block_idx}",
-        ).strip().lower()
-
-        # filtra
-        df_local = songs_df.copy()
-        if not df_local.empty:
-            df_local["__t"] = df_local["Título"].astype(str)
-            df_local["__a"] = df_local["Artista"].astype(str)
-            if q:
-                mask = (
-                    df_local["__t"].str.lower().str.contains(q, na=False)
-                    | df_local["__a"].str.lower().str.contains(q, na=False)
-                )
-                df_local = df_local[mask]
-
-        # container com scroll (só na lista)
-        list_box = st.container(height=360, border=True)
-
-        selected_set = set(st.session_state[sel_key])
-
-        with list_box:
-            if df_local.empty:
-                st.info("Nenhuma música encontrada.")
-            else:
-                # importante: iterrows mantém row.name (índice original)
-                for j, (_, row) in enumerate(df_local.iterrows()):
-                    titulo = str(row.get("Título", "")).strip()
-                    artista = str(row.get("Artista", "")).strip()
-                    tom = str(row.get("Tom_Original", "")).strip()
-
-                    if not titulo:
-                        continue
-
-                    label = f"{titulo} – {artista}" if artista else titulo
-                    if tom:
-                        label += f" ({tom})"
-
-                    uid = _song_uid(row, j)
-
-                    # ✅ KEY 100% única: prefixo + nonce + block + uid
-                    cb_key = f"sp_cb_{nonce}_{block_idx}_{uid}"
-
-                    checked = (uid in selected_set)
-                    val = st.checkbox(label, value=checked, key=cb_key)
-
-                    if val:
-                        selected_set.add(uid)
-                    else:
-                        selected_set.discard(uid)
-
-        # salva seleção atualizada
-        st.session_state[sel_key] = selected_set
-
-        st.markdown("---")
-        c1, c2, c3 = st.columns([1, 1, 2])
-
-        # limpar
-        if c1.button("Limpar seleção", use_container_width=True, key=f"sp_clear_{nonce}_{block_idx}"):
-            st.session_state[sel_key] = set()
-            st.rerun()
-
-        # cancelar
-        if c2.button("Cancelar", use_container_width=True, key=f"sp_cancel_{nonce}_{block_idx}"):
-            st.session_state.song_picker_open = False
-            st.session_state.song_picker_block_idx = None
-            st.rerun()
-
-        # adicionar
-        if c3.button("Adicionar selecionadas", use_container_width=True, key=f"sp_add_{nonce}_{block_idx}"):
-            chosen = st.session_state[sel_key]
-
-            if not chosen:
-                st.warning("Nenhuma música selecionada.")
-                return
-
-            # mapa uid -> row
-            # (usamos o índice original como uid)
-            df_all = songs_df.copy()
-            # garante que vamos conseguir localizar por índice
-            for uid in chosen:
-                try:
-                    row = df_all.loc[int(uid)] if uid.isdigit() else df_all.loc[uid]
-                except Exception:
-                    # fallback: tenta achar por string (caso índice seja string)
-                    try:
-                        row = df_all.loc[uid]
-                    except Exception:
-                        continue
-
-                cifra_id = str(row.get("CifraDriveID", "")).strip()
-                cifra_simplificada_id = str(row.get("CifraSimplificadaID", "")).strip()
-
-                new_item = {
-                    "type": "music",
-                    "title": row.get("Título", ""),
-                    "artist": row.get("Artista", ""),
-                    "tom_original": row.get("Tom_Original", ""),
-                    "tom": row.get("Tom_Original", ""),
-                    "bpm": row.get("BPM", ""),
-                    "cifra_id": cifra_id,
-                    "cifra_simplificada_id": cifra_simplificada_id,
-                    "use_simplificada": False,
-                    "text": "",
-                }
-
-                st.session_state.blocks[block_idx]["items"].append(new_item)
-
-            # fecha modal e limpa seleção
-            st.session_state[sel_key] = set()
-            st.session_state.song_picker_open = False
-            st.session_state.song_picker_block_idx = None
-            st.rerun()
-
-    _dialog()
-    
-# ==============================================================
-# 11.5) EDITOR EM ÁRVORE (SETLIST) — versão estável + modal picker
+# 11.5) EDITOR EM ÁRVORE (SETLIST) — versão ajustada visualmente
 # ==============================================================
 
 def render_setlist_editor_tree():
@@ -1140,27 +977,37 @@ def render_setlist_editor_tree():
 
     st.markdown("### Estrutura da Setlist (modo árvore)")
 
-    # ----------------------------------------------------------
-    # Adicionar bloco
-    # ----------------------------------------------------------
-    if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global"):
-        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
-        st.rerun()
+    # CSS para melhorar os botões das músicas
+    st.markdown("""
+    <style>
+    div[data-testid="stButton"] button.song-item-btn {
+        min-height: 92px !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        white-space: pre-line !important;
+        line-height: 1.35 !important;
+        padding-top: 12px !important;
+        padding-bottom: 12px !important;
+        font-size: 15px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     # ==========================================================
     # LOOP DOS BLOCOS
     # ==========================================================
     for b_idx, block in enumerate(blocks):
 
-        with st.expander(
-            f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}",
-            expanded=False
-        ):
+        block_title = f"Bloco {b_idx + 1}: {block.get('name', f'Bloco {b_idx+1}')}"
+        items = block.get("items", [])
+
+        with st.expander(block_title, expanded=False):
 
             # --------------------------------------------------
             # Cabeçalho do bloco
+            # Agora SEM os botões dentro do input
             # --------------------------------------------------
-            name_col, up_col, down_col, del_col = st.columns([6, 1, 1, 1])
+            name_col, up_col, down_col, del_col = st.columns([7, 1, 1, 1])
 
             block["name"] = name_col.text_input(
                 "Nome do bloco",
@@ -1169,15 +1016,15 @@ def render_setlist_editor_tree():
                 label_visibility="collapsed",
             )
 
-            if up_col.button("↑", key=f"blk_up_{b_idx}"):
+            if up_col.button("⬆️", key=f"blk_up_{b_idx}"):
                 move_block(b_idx, -1)
                 st.rerun()
 
-            if down_col.button("↓", key=f"blk_down_{b_idx}"):
+            if down_col.button("⬇️", key=f"blk_down_{b_idx}"):
                 move_block(b_idx, 1)
                 st.rerun()
 
-            if del_col.button("✕", key=f"blk_del_{b_idx}"):
+            if del_col.button("❎", key=f"blk_del_{b_idx}"):
                 delete_block(b_idx)
                 st.rerun()
 
@@ -1186,52 +1033,68 @@ def render_setlist_editor_tree():
             # ==================================================
             # ITENS DO BLOCO
             # ==================================================
-            for i, item in enumerate(block.get("items", [])):
+            for i, item in enumerate(items):
 
-                col_label, col_btns = st.columns([8, 2])
+                col_label, col_btns = st.columns([8.7, 2.3])
 
-                # ---------- label ----------
+                # ---------- label da música / pausa ----------
                 if item.get("type") == "music":
                     title = (item.get("title") or "Nova música").strip()
                     artist = (item.get("artist") or "").strip()
                     tom = (item.get("tom") or item.get("tom_original") or "").strip()
                     bpm = (item.get("bpm") or "").strip()
 
-                    label_main = f"🎵 {title}"
-                    if artist:
-                        label_main += f" – {artist}"
+                    label = f"🎵 {title}\n"
+                    label += f"      {artist if artist else '-'}\n"
 
-                    meta = []
-                    if tom:
-                        meta.append(f"Tom: {tom}")
-                    if bpm:
-                        meta.append(f"BPM: {bpm}")
+                    meta_parts = []
+                    meta_parts.append(f"Tom: {tom if tom else '-'}")
+                    meta_parts.append(f"BPM: {bpm if bpm else '-'}")
 
-                    label = label_main + ("  ·  " + " | ".join(meta) if meta else "")
+                    label += f"      {' | '.join(meta_parts)}"
 
                 else:
-                    label = f"⏸ {item.get('label', 'Pausa')}"
+                    pause_label = item.get("label", "Pausa")
+                    label = f"⏸ {pause_label}"
 
                 # selecionar item
-                if col_label.button(label, key=f"sel_item_{b_idx}_{i}"):
+                btn = col_label.button(
+                    label,
+                    key=f"sel_item_{b_idx}_{i}",
+                    use_container_width=True,
+                )
+
+                # aplica classe visual depois do botão existir
+                st.markdown("""
+                <script>
+                const buttons = window.parent.document.querySelectorAll('button[kind]');
+                buttons.forEach(btn => {
+                    if (btn.innerText.includes("🎵") || btn.innerText.includes("⏸")) {
+                        btn.classList.add("song-item-btn");
+                    }
+                });
+                </script>
+                """, unsafe_allow_html=True)
+
+                if btn:
                     st.session_state.selected_block_idx = b_idx
                     st.session_state.selected_item_idx = i
                     st.session_state.current_item = (b_idx, i)
                     st.rerun()
 
-                # ---------- botões ----------
+                # ---------- botões laterais ----------
                 with col_btns:
                     cu, cd, cx, cp = st.columns(4)
 
-                    if cu.button("↑", key=f"it_up_{b_idx}_{i}"):
+                    if cu.button("⬆️", key=f"it_up_{b_idx}_{i}"):
                         move_item(b_idx, i, -1)
                         st.rerun()
 
-                    if cd.button("↓", key=f"it_down_{b_idx}_{i}"):
+                    if cd.button("⬇️", key=f"it_down_{b_idx}_{i}"):
                         move_item(b_idx, i, 1)
                         st.rerun()
 
-                    if cx.button("✕", key=f"it_del_{b_idx}_{i}"):
+                    if cx.button("❎", key=f"it_del_{b_idx}_{i}"):
                         delete_item(b_idx, i)
                         st.rerun()
 
@@ -1242,11 +1105,10 @@ def render_setlist_editor_tree():
             st.markdown("---")
 
             # ==================================================
-            # BOTÕES ADICIONAR
+            # BOTÕES ADICIONAR ITENS NO BLOCO
             # ==================================================
             col_add_mus, col_add_pause = st.columns(2)
 
-            # ✅ abre modal (NÃO chama função aqui)
             if col_add_mus.button("Música do banco", key=f"add_mus_blk_{b_idx}", use_container_width=True):
                 st.session_state.song_picker_open = True
                 st.session_state.song_picker_block_idx = b_idx
@@ -1257,7 +1119,16 @@ def render_setlist_editor_tree():
                 st.rerun()
 
     # ==========================================================
-    # ✅ MODAL FORA DO LOOP (CRÍTICO)
+    # BOTÃO ADICIONAR BLOCO — AGORA EMBAIXO DOS BLOCOS
+    # ==========================================================
+    st.markdown("---")
+
+    if st.button("+ Adicionar bloco", use_container_width=True, key="btn_add_block_global_bottom"):
+        st.session_state.blocks.append({"name": f"Bloco {len(blocks) + 1}", "items": []})
+        st.rerun()
+
+    # ==========================================================
+    # MODAL FORA DO LOOP
     # ==========================================================
     if st.session_state.get("song_picker_open", False):
         target_b = st.session_state.get("song_picker_block_idx", None)

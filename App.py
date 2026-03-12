@@ -410,23 +410,37 @@ def load_songs_df_from_github_csv() -> pd.DataFrame:
         st.error(f"Erro carregando CSV do GitHub: {e}")
         df = pd.DataFrame()
 
-    # normalize nomes de colunas
+    # evita erro se vier totalmente vazio
+    if df.empty:
+        df = pd.DataFrame(columns=[
+            "Título", "Artista", "Tom_Original", "BPM",
+            "CifraDriveID", "CifraSimplificadaID"
+        ])
+
+    # normaliza nomes de colunas
     df.columns = [str(c).strip() for c in df.columns]
     df = df.rename(columns={
         "Titulo": "Título",
         "titulo": "Título",
         "Title": "Título",
         "title": "Título",
+
         "Artista": "Artista",
         "artist": "Artista",
         "Artist": "Artista",
+
         "TomOriginal": "Tom_Original",
         "Tom Original": "Tom_Original",
         "Tom_Original": "Tom_Original",
+
         "Bpm": "BPM",
         "bpm": "BPM",
+
         "CifraDriveId": "CifraDriveID",
+        "CifraDriveID": "CifraDriveID",
+
         "CifraSimplificadaId": "CifraSimplificadaID",
+        "CifraSimplificadaID": "CifraSimplificadaID",
     })
 
     expected = ["Título", "Artista", "Tom_Original", "BPM", "CifraDriveID", "CifraSimplificadaID"]
@@ -437,7 +451,10 @@ def load_songs_df_from_github_csv() -> pd.DataFrame:
     df = df[expected].fillna("")
 
     if "Título" in df.columns:
-        df = df.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+        df = df.sort_values(
+            "Título",
+            key=lambda s: s.astype(str).str.lower()
+        ).reset_index(drop=True)
 
     return df
 
@@ -460,7 +477,10 @@ def save_songs_df_to_github(df: pd.DataFrame):
     df = df[expected].fillna("")
 
     if "Título" in df.columns:
-        df = df.sort_values("Título", key=lambda s: s.astype(str).str.lower()).reset_index(drop=True)
+        df = df.sort_values(
+            "Título",
+            key=lambda s: s.astype(str).str.lower()
+        ).reset_index(drop=True)
 
     csv_text = df.to_csv(index=False)
     content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
@@ -1353,11 +1373,8 @@ def render_song_database():
     # ----------------------------------------------------------
     if "songs_editor_df" not in st.session_state:
         df_init = st.session_state.songs_df.copy().fillna("")
-
-        # cria uma coluna interna estável para o editor
         df_init = df_init.reset_index(drop=True)
         df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
-
         st.session_state.songs_editor_df = df_init
 
     top_a, top_b = st.columns(2)
@@ -1374,8 +1391,8 @@ def render_song_database():
                 "Artista": "",
                 "Tom_Original": "",
                 "BPM": "",
-                "CifraPath": "",
-                "CifraSimplificadaPath": "",
+                "CifraDriveID": "",
+                "CifraSimplificadaID": "",
                 "_row_id": f"row_new_{len(df_edit)}_{datetime.utcnow().timestamp()}",
             }
 
@@ -1417,15 +1434,13 @@ def render_song_database():
             "Artista": st.column_config.TextColumn("Artista"),
             "Tom_Original": st.column_config.TextColumn("Tom_Original"),
             "BPM": st.column_config.TextColumn("BPM"),
-            "CifraPath": st.column_config.TextColumn("CifraPath"),
-            "CifraSimplificadaPath": st.column_config.TextColumn("CifraSimplificadaPath"),
-            "_row_id": None,  # esconde a coluna interna
+            "CifraDriveID": st.column_config.TextColumn("CifraDriveID"),
+            "CifraSimplificadaID": st.column_config.TextColumn("CifraSimplificadaID"),
+            "_row_id": None,
         },
     )
 
     edited_df = edited_df.fillna("")
-
-    # mantém exatamente como o editor devolveu
     st.session_state.songs_editor_df = edited_df.copy()
 
     save_col1, save_col2 = st.columns([1, 2])
@@ -1437,7 +1452,6 @@ def render_song_database():
         if st.button("💾 Salvar banco de músicas", use_container_width=True, key="btn_save_songs_db"):
             df_to_save = st.session_state.songs_editor_df.copy().fillna("")
 
-            # remove coluna interna
             df_to_save = df_to_save.drop(columns=["_row_id"], errors="ignore")
 
             # remove linhas totalmente vazias
@@ -1447,12 +1461,11 @@ def render_song_database():
                     df_to_save["Artista"].astype(str).str.strip().eq("") &
                     df_to_save["Tom_Original"].astype(str).str.strip().eq("") &
                     df_to_save["BPM"].astype(str).str.strip().eq("") &
-                    df_to_save["CifraPath"].astype(str).str.strip().eq("") &
-                    df_to_save["CifraSimplificadaPath"].astype(str).str.strip().eq("")
+                    df_to_save["CifraDriveID"].astype(str).str.strip().eq("") &
+                    df_to_save["CifraSimplificadaID"].astype(str).str.strip().eq("")
                 )
             ].copy()
 
-            # ordena só aqui
             if "Título" in df_to_save.columns:
                 df_to_save = df_to_save.sort_values(
                     "Título",
@@ -1461,7 +1474,6 @@ def render_song_database():
 
             save_songs_df_to_github(df_to_save)
 
-            # recria editor já ordenado e com ids novos
             df_editor_after_save = df_to_save.copy().fillna("")
             df_editor_after_save["_row_id"] = [f"row_{i}" for i in range(len(df_editor_after_save))]
 
@@ -1474,19 +1486,111 @@ def render_song_database():
 
     st.markdown("---")
 
-    with st.expander("Referência para cadastro manual dos TXT em Data/Cifras", expanded=False):
-        st.markdown("""
-**Fluxo sugerido:**
-1. Gere ou transcreva a cifra na seção de OCR.
-2. Salve manualmente o arquivo `.txt` na pasta `Data/Cifras`.
-3. Preencha na tabela acima:
-   - `CifraPath`
-   - `CifraSimplificadaPath`
+    # ----------------------------------------------------------
+    # CRIAR TXT NO GOOGLE DRIVE
+    # ----------------------------------------------------------
+    with st.expander("Gerar TXT no Drive (para depois colar os IDs na tabela)", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            title = st.text_input("Título", key="new_title")
+            artist = st.text_input("Artista", key="new_artist")
+        with c2:
+            tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)", key="new_tom")
+            bpm = st.text_input("BPM", key="new_bpm")
 
-**Exemplos de caminho:**
-- `Data/Cifras/Deixa_a_Vida_Me_Levar_Original.txt`
-- `Data/Cifras/Deixa_a_Vida_Me_Levar_Simplificada.txt`
-""")
+        st.markdown("---")
+
+        st.markdown("#### 1) Cifra ORIGINAL")
+        up_orig = st.file_uploader(
+            "Envie imagem (.jpg/.png) ou .txt da cifra original",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_orig",
+        )
+
+        col_tr1, col_tr2 = st.columns([1, 3])
+        with col_tr1:
+            if st.button("Transcrever com Gemini (Original)", key="btn_tr_orig"):
+                if up_orig is None:
+                    st.warning("Envie uma imagem ou .txt primeiro.")
+                else:
+                    if up_orig.type == "text/plain":
+                        text = up_orig.getvalue().decode("utf-8", errors="replace")
+                    else:
+                        text = transcribe_image_with_gemini(up_orig)
+                    st.session_state.new_song_cifra_original = text
+
+        with col_tr2:
+            st.caption("Se você enviar um .txt, não precisa transcrever. Se enviar imagem, o Gemini tenta extrair.")
+
+        st.session_state.new_song_cifra_original = st.text_area(
+            "Texto da cifra ORIGINAL",
+            value=st.session_state.new_song_cifra_original,
+            height=220,
+            key="txt_orig",
+        )
+
+        st.markdown("---")
+
+        st.markdown("#### 2) Cifra SIMPLIFICADA (opcional)")
+        up_simpl = st.file_uploader(
+            "Envie imagem (.jpg/.png) ou .txt da cifra simplificada",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_simpl",
+        )
+
+        if st.button("Transcrever com Gemini (Simplificada)", key="btn_tr_simpl"):
+            if up_simpl is None:
+                st.warning("Envie uma imagem ou .txt primeiro.")
+            else:
+                if up_simpl.type == "text/plain":
+                    text_s = up_simpl.getvalue().decode("utf-8", errors="replace")
+                else:
+                    text_s = transcribe_image_with_gemini(up_simpl)
+                st.session_state.new_song_cifra_simplificada = text_s
+
+        st.session_state.new_song_cifra_simplificada = st.text_area(
+            "Texto da cifra SIMPLIFICADA",
+            value=st.session_state.new_song_cifra_simplificada,
+            height=220,
+            key="txt_simpl",
+        )
+
+        st.markdown("---")
+        st.markdown("#### 3) Criar arquivos no Drive (TXT)")
+
+        if st.button("Criar TXT no Drive", key="btn_create_txt"):
+            if not (title or "").strip():
+                st.warning("Preencha pelo menos o título.")
+            else:
+                with st.spinner("Criando arquivos no Drive..."):
+                    content_orig = st.session_state.new_song_cifra_original or ""
+                    content_simpl = st.session_state.new_song_cifra_simplificada or ""
+
+                    final_cifra_id = ""
+                    final_simpl_id = ""
+
+                    if content_orig.strip():
+                        final_cifra_id = create_chord_in_drive(
+                            f"{title} - {artist} (Original)",
+                            content_orig
+                        )
+
+                    if content_simpl.strip():
+                        final_simpl_id = create_chord_in_drive(
+                            f"{title} - {artist} (Simplificada)",
+                            content_simpl
+                        )
+
+                if not final_cifra_id and not final_simpl_id:
+                    st.error("Nenhum arquivo foi criado no Drive. Verifique o st.secrets, a pasta e as permissões do service account.")
+                else:
+                    st.success("TXT criado no Drive.")
+                    st.info(
+                        f"Agora cole estes IDs na tabela acima:\n\n"
+                        f"- CifraDriveID: {final_cifra_id}\n"
+                        f"- CifraSimplificadaID: {final_simpl_id}\n\n"
+                        f"(Tom_Original: {tom_original} | BPM: {bpm})"
+                    )
                 
 # ==============================================================
 # 12.5) GEMINI AI — OCR CIFRA (imagem → texto)

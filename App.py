@@ -79,8 +79,6 @@ if GEMINI_API_KEY and genai is not None:
 # 2) CONSTANTES + TRANSPOSIÇÃO REAL DA CIFRA
 # ==============================================================
 
-import re
-
 # -----------------------------
 # Sequências de notas
 # -----------------------------
@@ -1622,10 +1620,6 @@ def render_song_database():
 # 12.5) GEMINI AI — OCR CIFRA (imagem → texto)
 # ==============================================================
 
-import google.generativeai as genai
-import re
-import base64
-
 
 # --------------------------------------------------------------
 # 🔧 Corrige linhas de acordes automaticamente (prefixa "| ")
@@ -1867,7 +1861,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     obs = item.get("obs", "") or ""
     prep = item.get("preparacao", "") or ""
 
-    # ========= cifra =========
     cifra_txt = ""
     use_s = item.get("use_simplificada", False)
     cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
@@ -1877,17 +1870,14 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     else:
         cifra_txt = item.get("text", "")
 
-    # ✅ AQUI: transpõe para o TOM atual do item
     tom_atual = (item.get("tom") or "").strip()
     tom_original = (item.get("tom_original") or tom_atual).strip()
 
     if cifra_txt and tom_original and tom_atual and tom_original != tom_atual:
         cifra_txt = transpose_chord_text(cifra_txt, tom_original, tom_atual)
 
-    # só depois remove o "|" para exibição
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
-    # ========= próxima =========
     next_title = ""
     next_artist = ""
     next_tom = ""
@@ -1916,102 +1906,99 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 <style>
   html, body {{
-      margin:0;
-      padding:0;
-      background:white;
-      color:#1111/* ✅ mata scroll lateral */
-      overflow-y:hidden;
+      margin: 0;
+      padding: 0;
+      background: white;
+      color: #111;
+      overflow-x: hidden;
+      overflow-y: hidden;
   }}
 
   body {{
       font-family: "Courier New", monospace;
   }}
 
-  /* ✅ wrapper do container */
   .outer {{
-      width:100%;
-      overflow-x:hidden;
-      padding:0;
-      margin:0;
+      width: 100%;
+      overflow-x: hidden;
+      padding: 0;
+      margin: 0;
   }}
 
-  /* ✅ tudo que é “folha” fica aqui dentro e pode ser escalado */
   .scale-root {{
-      width:max-content;       /* mede largura real do conteúdo */
-      height:max-content;
-      transform-origin: top left; /* escala a partir do topo/esquerda */
+      width: max-content;
+      height: max-content;
+      transform-origin: top left;
   }}
 
   .sheet {{
-      width:clamp(90%, 100%, 100%);   /* mantém seus valores */
-      aspect-ratio: 3 / 4;   /* ⭐ AQUI */
-      margin:auto;
-      padding:clamp(5px, 1vw, 10px);
-      box-sizing:border-box;
+      width: clamp(90%, 100%, 100%);
+      aspect-ratio: 3 / 4;
+      margin: auto;
+      padding: clamp(5px, 1vw, 10px);
+      box-sizing: border-box;
   }}
 
   .top {{
-      display:grid;
+      display: grid;
       grid-template-columns: 1fr auto auto;
-      gap:10px;
-      border-bottom:1px solid #ddd;
-      padding-bottom:8px;
+      gap: 10px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 8px;
   }}
 
   .title {{
       font-size: clamp(14px, 2.2vw, 22px);
-      font-weight:800;
+      font-weight: 800;
   }}
 
   .artist {{
       font-size: clamp(11px, 1.8vw, 14px);
-      color:#555;
+      color: #555;
   }}
 
   .kv {{
-      text-align:right;
+      text-align: right;
       font-size: clamp(10px, 1.6vw, 13px);
   }}
 
   .section-title {{
-      margin-top:10px;
-      font-weight:800;
-      font-size:12px;
+      margin-top: 10px;
+      font-weight: 800;
+      font-size: 12px;
   }}
 
   .box {{
-      border-top:1px solid #ddd;
-      border-bottom:1px solid #ddd;
-      padding:6px 0;
-      min-height:20px;
-      font-size:12px;
-      white-space:pre-wrap;
-      box-sizing:border-box;
+      border-top: 1px solid #ddd;
+      border-bottom: 1px solid #ddd;
+      padding: 6px 0;
+      min-height: 20px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      box-sizing: border-box;
   }}
 
   .cifra {{
       font-family: "Courier New", monospace;
       white-space: pre;
-      overflow:hidden;
-      margin-top:10px;
-      padding:10px;
-      border:1px solid #eee;
-      border-radius:10px;
-
-      font-size:14px;
-      line-height:1.25;
-      box-sizing:border-box;
-
-      max-width: 100%; /* ✅ impede “estouro” */
+      overflow: hidden;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      font-size: 14px;
+      line-height: 1.25;
+      box-sizing: border-box;
+      max-width: 100%;
   }}
 
   .next {{
-      margin-top:12px;
-      border-top:1px solid #ddd;
-      padding-top:10px;
-      display:grid;
+      margin-top: 12px;
+      border-top: 1px solid #ddd;
+      padding-top: 10px;
+      display: grid;
       grid-template-columns: 1fr auto auto;
-      gap:10px;
+      gap: 10px;
   }}
 </style>
 </head>
@@ -2056,9 +2043,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 <script>
 (function() {{
 
-  // ================================
-  // 1) AUTO-FIT DA FOLHA (SCALE)
-  // ================================
   const outer = document.getElementById("outer");
   const scaleRoot = document.getElementById("scaleRoot");
   const sheet = document.getElementById("sheet");
@@ -2066,26 +2050,18 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   function fitSheet() {{
     if (!outer || !scaleRoot || !sheet) return;
 
-    // reseta escala pra medir “real”
     scaleRoot.style.transform = "scale(1)";
 
-    // largura real do conteúdo (a folha)
     const contentW = scaleRoot.scrollWidth || sheet.scrollWidth || 1;
     const availW = outer.clientWidth || window.innerWidth || 1;
 
-    // escala só pra baixo (nunca aumenta)
     const scale = Math.min(1, availW / contentW);
-
     scaleRoot.style.transform = "scale(" + scale + ")";
 
-    // ajusta a altura do body pra não cortar (importante em iframe)
     const contentH = (scaleRoot.scrollHeight || sheet.scrollHeight || 1) * scale;
     document.body.style.height = contentH + "px";
   }}
 
-  // ==========================================
-  // 2) AUTO-FIT DA CIFRA (REDUZ FONT ATÉ CABER)
-  // ==========================================
   const box = document.querySelector('.cifra');
 
   const MAX = 14;
@@ -2103,15 +2079,13 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
     let px = MAX;
     box.style.fontSize = px + 'px';
 
-    while(px > MIN && !fitsCifra()) {{
+    while (px > MIN && !fitsCifra()) {{
       px -= STEP;
       box.style.fontSize = px + 'px';
     }}
   }}
 
-  // roda na carga e resize
   function runAll() {{
-    // duas RAFs ajudam o layout estabilizar no Streamlit/iframe
     requestAnimationFrame(() => {{
       requestAnimationFrame(() => {{
         fitCifra();
@@ -2122,11 +2096,8 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
   window.addEventListener('load', runAll);
   window.addEventListener('resize', runAll);
-
-  // em alguns mobiles, "orientationchange" ajuda
   window.addEventListener('orientationchange', runAll);
 
-  // primeira execução
   runAll();
 
 }})();
@@ -2135,7 +2106,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 </body>
 </html>
 """
-
     return html
 
 # ==============================================================
@@ -2145,8 +2115,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 # 13.5) FULLSCREEN SLIDES VIEWER (SWIPE) — clean + FS btn auto-hide
 # ==============================================================
 
-import streamlit.components.v1 as components
-import json
 
 def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     if not slides:
@@ -2447,15 +2415,6 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
 #   - Auto-fit da cifra por LARGURA e ALTURA (não corta / não “sobra”)
 #   - Fonte mono com suporte a acentos (tenta DejaVuSansMono; fallback Courier)
 # ==============================================================
-
-from io import BytesIO
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-import os
-import textwrap
 
 # -----------------------------
 # Fonte (mono) com acentos

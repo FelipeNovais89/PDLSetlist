@@ -309,25 +309,31 @@ def get_drive_service():
 
 def create_chord_in_drive(filename, content):
     """Cria um novo .txt no Drive e retorna o FileID."""
-    if not (content or "").strip():
-        return ""
-
     try:
         service = get_drive_service()
         folder_id = st.secrets.get("drive", {}).get("folder_id", None)
 
-        file_metadata = {"name": f"{filename}.txt", "mimeType": "text/plain"}
+        file_metadata = {
+            "name": f"{filename}.txt",
+            "mimeType": "text/plain",
+        }
         if folder_id:
             file_metadata["parents"] = [folder_id]
 
-        fh = io.BytesIO(content.encode("utf-8"))
-        media = MediaIoBaseUpload(fh, mimetype="text/plain")
+        fh = io.BytesIO((content or "").encode("utf-8"))
+        media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
 
         file = (
             service.files()
-            .create(body=file_metadata, media_body=media, fields="id", supportsAllDrives=True)
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields="id,name",
+                supportsAllDrives=True,
+            )
             .execute()
         )
+
         return file.get("id", "")
 
     except Exception as e:
@@ -366,12 +372,57 @@ def save_chord_to_drive(file_id: str, content: str):
     try:
         service = get_drive_service()
         fh = io.BytesIO((content or "").encode("utf-8"))
-        media = MediaIoBaseUpload(fh, mimetype="text/plain")
-        service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
+        media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
+        service.files().update(
+            fileId=file_id,
+            media_body=media,
+            supportsAllDrives=True
+        ).execute()
         load_chord_from_drive.clear()
 
     except Exception as e:
         st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
+
+
+def sanitize_txt_filename(name: str) -> str:
+    name = (name or "").strip()
+    name = re.sub(r'[\\/:*?"<>|]+', "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name or "Sem_Titulo"
+
+
+def add_song_row_to_session(song_data: dict, cifra_id: str = "", cifra_simplificada_id: str = ""):
+    """
+    Adiciona uma música ao editor/tabela em memória e reorganiza alfabeticamente.
+    """
+    if "songs_editor_df" not in st.session_state:
+        df_init = st.session_state.songs_df.copy().fillna("")
+        df_init = df_init.reset_index(drop=True)
+        df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
+        st.session_state.songs_editor_df = df_init
+
+    df_edit = st.session_state.songs_editor_df.copy().fillna("")
+
+    new_row = {
+        "Título": song_data.get("title", ""),
+        "Artista": song_data.get("artist", ""),
+        "Tom_Original": song_data.get("tom_original", ""),
+        "BPM": song_data.get("bpm", ""),
+        "CifraDriveID": cifra_id or "",
+        "CifraSimplificadaID": cifra_simplificada_id or "",
+        "_row_id": f"row_new_{datetime.utcnow().timestamp()}",
+    }
+
+    df_edit = pd.concat([df_edit, pd.DataFrame([new_row])], ignore_index=True)
+
+    if "Título" in df_edit.columns:
+        df_edit = df_edit.sort_values(
+            "Título",
+            key=lambda s: s.astype(str).str.lower()
+        ).reset_index(drop=True)
+
+    df_edit["_row_id"] = [f"row_{i}" for i in range(len(df_edit))]
+    st.session_state.songs_editor_df = df_edit
 
 # ==============================================================
 # 5) GITHUB – CSV BANCO + CSV SETLISTS
@@ -671,13 +722,34 @@ def init_state():
     if "new_song_cifra_simplificada" not in st.session_state:
         st.session_state.new_song_cifra_simplificada = ""
 
-    # ✅ nova navegação lateral
     if "app_section" not in st.session_state:
         st.session_state.app_section = "setlist"
 
-    # ✅ estado do fullscreen
     if "pdl_fullscreen" not in st.session_state:
         st.session_state.pdl_fullscreen = False
+
+    # ===== NOVOS ESTADOS DO FLUXO POPUP =====
+    if "songs_editor_df" not in st.session_state:
+        df_init = st.session_state.songs_df.copy().fillna("")
+        df_init = df_init.reset_index(drop=True)
+        df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
+        st.session_state.songs_editor_df = df_init
+
+    if "new_song_form_data" not in st.session_state:
+        st.session_state.new_song_form_data = {
+            "title": "",
+            "artist": "",
+            "tom_original": "",
+            "bpm": "",
+            "cifra_original": "",
+            "cifra_simplificada": "",
+        }
+
+    if "new_song_show_form_dialog" not in st.session_state:
+        st.session_state.new_song_show_form_dialog = False
+
+    if "new_song_show_save_dialog" not in st.session_state:
+        st.session_state.new_song_show_save_dialog = False
 
 
 # ==============================================================
@@ -1399,43 +1471,202 @@ def render_setlist_editor_tree():
     render_selected_item_editor()
 
 # ==============================================================
-# 12) BANCO DE MÚSICAS (GitHub CSV) + REFERÊNCIA A TXT MANUAL
+# 12) BANCO DE MÚSICAS (GitHub CSV) + POPUP NOVA MÚSICA + DRIVE
 # ==============================================================
 
 def render_song_database():
     st.subheader("Banco de músicas")
 
+    # ----------------------------------------------------------
+    # Inicializa editor
+    # ----------------------------------------------------------
     if "songs_editor_df" not in st.session_state:
         df_init = st.session_state.songs_df.copy().fillna("")
         df_init = df_init.reset_index(drop=True)
         df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
         st.session_state.songs_editor_df = df_init
 
-    top_a, top_b = st.columns(2)
+    # ----------------------------------------------------------
+    # DIALOG 1 — FORMULÁRIO NOVA MÚSICA
+    # ----------------------------------------------------------
+    @st.dialog("Adicionar nova música", width="large")
+    def new_song_form_dialog():
+        form_data = st.session_state.get("new_song_form_data", {})
 
-    with top_a:
-        if st.button("➕ Adicionar nova música", use_container_width=True, key="btn_add_song_row"):
-            current_df = st.session_state.get("songs_data_editor", st.session_state.songs_editor_df)
+        title = st.text_input("Título", value=form_data.get("title", ""), key="dlg_song_title")
+        artist = st.text_input("Artista", value=form_data.get("artist", ""), key="dlg_song_artist")
 
-            if isinstance(current_df, pd.DataFrame):
-                df_edit = current_df.copy().fillna("")
-            else:
-                df_edit = st.session_state.songs_editor_df.copy().fillna("")
+        c1, c2 = st.columns(2)
+        with c1:
+            tom_original = st.text_input(
+                "Tom original",
+                value=form_data.get("tom_original", ""),
+                key="dlg_song_tom"
+            )
+        with c2:
+            bpm = st.text_input(
+                "BPM",
+                value=form_data.get("bpm", ""),
+                key="dlg_song_bpm"
+            )
 
-            new_row = {
-                "Título": "",
-                "Artista": "",
-                "Tom_Original": "",
-                "BPM": "",
-                "CifraDriveID": "",
-                "CifraSimplificadaID": "",
-                "_row_id": f"row_new_{len(df_edit)}_{datetime.utcnow().timestamp()}",
-            }
+        st.markdown("#### Cifra ORIGINAL")
+        cifra_original = st.text_area(
+            "Texto da cifra original",
+            value=form_data.get("cifra_original", ""),
+            height=220,
+            key="dlg_song_cifra_original"
+        )
 
-            df_edit = pd.concat([df_edit, pd.DataFrame([new_row])], ignore_index=True)
-            st.session_state.songs_editor_df = df_edit
+        st.markdown("#### Cifra SIMPLIFICADA")
+        cifra_simplificada = st.text_area(
+            "Texto da cifra simplificada",
+            value=form_data.get("cifra_simplificada", ""),
+            height=220,
+            key="dlg_song_cifra_simplificada"
+        )
+
+        b1, b2 = st.columns(2)
+
+        if b1.button("Cancelar", use_container_width=True, key="dlg_song_cancel"):
+            st.session_state.new_song_show_form_dialog = False
             st.rerun()
 
+        if b2.button("Continuar", use_container_width=True, key="dlg_song_continue"):
+            if not (title or "").strip():
+                st.warning("Preencha pelo menos o título.")
+                return
+
+            st.session_state.new_song_form_data = {
+                "title": title.strip(),
+                "artist": artist.strip(),
+                "tom_original": tom_original.strip(),
+                "bpm": str(bpm).strip(),
+                "cifra_original": cifra_original or "",
+                "cifra_simplificada": cifra_simplificada or "",
+            }
+            st.session_state.new_song_show_form_dialog = False
+            st.session_state.new_song_show_save_dialog = True
+            st.rerun()
+
+    # ----------------------------------------------------------
+    # DIALOG 2 — DESTINO DOS TXT
+    # ----------------------------------------------------------
+    @st.dialog("Salvar arquivos TXT", width="large")
+    def new_song_save_dialog():
+        form_data = st.session_state.get("new_song_form_data", {})
+        title = form_data.get("title", "")
+        artist = form_data.get("artist", "")
+        cifra_original = form_data.get("cifra_original", "")
+        cifra_simplificada = form_data.get("cifra_simplificada", "")
+
+        base_name = sanitize_txt_filename(
+            f"{title} - {artist}" if artist else title
+        )
+        orig_filename = f"{base_name} (Original)"
+        simpl_filename = f"{base_name} (Simplificada)"
+
+        st.markdown(f"**Música:** {title}")
+        if artist:
+            st.caption(artist)
+
+        st.info(
+            "Salvar no Google Drive gera automaticamente os IDs para preencher "
+            "`CifraDriveID` e `CifraSimplificadaID`."
+        )
+
+        drive_col, local_col = st.columns(2)
+
+        # ===== DRIVE =====
+        if drive_col.button("Salvar no Google Drive", use_container_width=True, key="dlg_save_drive"):
+            with st.spinner("Salvando arquivos no Drive..."):
+                final_cifra_id = create_chord_in_drive(orig_filename, cifra_original)
+                final_simpl_id = create_chord_in_drive(simpl_filename, cifra_simplificada)
+
+            add_song_row_to_session(
+                song_data=form_data,
+                cifra_id=final_cifra_id,
+                cifra_simplificada_id=final_simpl_id,
+            )
+
+            st.session_state.new_song_show_save_dialog = False
+            st.success("Música adicionada à tabela com IDs do Google Drive.")
+            st.rerun()
+
+        # ===== LOCAL =====
+        if local_col.button("Salvar no dispositivo", use_container_width=True, key="dlg_save_local"):
+            add_song_row_to_session(
+                song_data=form_data,
+                cifra_id="",
+                cifra_simplificada_id="",
+            )
+            st.session_state.new_song_show_save_dialog = False
+            st.warning("Música adicionada sem IDs do Drive. Use os downloads abaixo.")
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### Download dos TXT")
+
+        d1, d2 = st.columns(2)
+        with d1:
+            st.download_button(
+                "Baixar TXT ORIGINAL",
+                data=cifra_original or "",
+                file_name=f"{orig_filename}.txt",
+                mime="text/plain",
+                use_container_width=True,
+                key="dlg_download_orig"
+            )
+        with d2:
+            st.download_button(
+                "Baixar TXT SIMPLIFICADA",
+                data=cifra_simplificada or "",
+                file_name=f"{simpl_filename}.txt",
+                mime="text/plain",
+                use_container_width=True,
+                key="dlg_download_simpl"
+            )
+
+        c1, c2 = st.columns(2)
+        if c1.button("Voltar", use_container_width=True, key="dlg_save_back"):
+            st.session_state.new_song_show_save_dialog = False
+            st.session_state.new_song_show_form_dialog = True
+            st.rerun()
+
+        if c2.button("Cancelar", use_container_width=True, key="dlg_save_cancel"):
+            st.session_state.new_song_show_save_dialog = False
+            st.rerun()
+
+    # ----------------------------------------------------------
+    # ABRE DIALOGS
+    # ----------------------------------------------------------
+    if st.session_state.get("new_song_show_form_dialog", False):
+        new_song_form_dialog()
+
+    if st.session_state.get("new_song_show_save_dialog", False):
+        new_song_save_dialog()
+
+    top_a, top_b = st.columns(2)
+
+    # ----------------------------------------------------------
+    # Adicionar nova música
+    # ----------------------------------------------------------
+    with top_a:
+        if st.button("➕ Adicionar nova música", use_container_width=True, key="btn_add_song_row"):
+            st.session_state.new_song_form_data = {
+                "title": "",
+                "artist": "",
+                "tom_original": "",
+                "bpm": "",
+                "cifra_original": "",
+                "cifra_simplificada": "",
+            }
+            st.session_state.new_song_show_form_dialog = True
+            st.rerun()
+
+    # ----------------------------------------------------------
+    # Recarregar do GitHub
+    # ----------------------------------------------------------
     with top_b:
         if st.button("🔄 Recarregar do GitHub", use_container_width=True, key="btn_reload_songs"):
             load_songs_df_from_github_csv.clear()
@@ -1449,6 +1680,9 @@ def render_song_database():
 
     st.caption("Você pode editar diretamente a tabela abaixo e depois salvar no GitHub.")
 
+    # ----------------------------------------------------------
+    # Data editor
+    # ----------------------------------------------------------
     df_editable = st.session_state.songs_editor_df.copy().fillna("")
 
     edited_df = st.data_editor(
@@ -1469,12 +1703,14 @@ def render_song_database():
         },
     )
 
-    if isinstance(edited_df, pd.DataFrame):
-        edited_df = edited_df.fillna("")
-        st.session_state.songs_editor_df = edited_df.copy()
+    edited_df = edited_df.fillna("")
+    st.session_state.songs_editor_df = edited_df.copy()
 
     save_col1, save_col2 = st.columns([1, 2])
 
+    # ----------------------------------------------------------
+    # Salvar banco
+    # ----------------------------------------------------------
     with save_col1:
         if st.button("💾 Salvar banco de músicas", use_container_width=True, key="btn_save_songs_db"):
             df_to_save = st.session_state.songs_editor_df.copy().fillna("")
@@ -1507,11 +1743,14 @@ def render_song_database():
             st.rerun()
 
     with save_col2:
-        st.caption("A ordem alfabética é aplicada ao salvar, para não atrapalhar a edição das linhas novas.")
+        st.caption("A ordem alfabética é aplicada ao salvar.")
 
     st.markdown("---")
 
-    with st.expander("Gerar TXT no Drive (para depois colar os IDs na tabela)", expanded=False):
+    # ----------------------------------------------------------
+    # ÁREA ANTIGA DE OCR/TXT NO BANCO
+    # ----------------------------------------------------------
+    with st.expander("Gerar TXT no Drive manualmente (modo antigo)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
             title = st.text_input("Título", key="new_title")
@@ -1588,23 +1827,17 @@ def render_song_database():
                     content_orig = st.session_state.new_song_cifra_original or ""
                     content_simpl = st.session_state.new_song_cifra_simplificada or ""
 
-                    final_cifra_id = ""
-                    final_simpl_id = ""
-
-                    if content_orig.strip():
-                        final_cifra_id = create_chord_in_drive(
-                            f"{title} - {artist} (Original)",
-                            content_orig
-                        )
-
-                    if content_simpl.strip():
-                        final_simpl_id = create_chord_in_drive(
-                            f"{title} - {artist} (Simplificada)",
-                            content_simpl
-                        )
+                    final_cifra_id = create_chord_in_drive(
+                        f"{title} - {artist} (Original)",
+                        content_orig
+                    )
+                    final_simpl_id = create_chord_in_drive(
+                        f"{title} - {artist} (Simplificada)",
+                        content_simpl
+                    )
 
                 if not final_cifra_id and not final_simpl_id:
-                    st.error("Nenhum arquivo foi criado no Drive. Verifique o st.secrets, a pasta e as permissões do service account.")
+                    st.error("Nenhum arquivo foi criado no Drive. Verifique st.secrets e permissões.")
                 else:
                     st.success("TXT criado no Drive.")
                     st.info(
@@ -1613,7 +1846,6 @@ def render_song_database():
                         f"- CifraSimplificadaID: {final_simpl_id}\n\n"
                         f"(Tom_Original: {tom_original} | BPM: {bpm})"
                     )
-            
 
                 
 # ==============================================================

@@ -27,12 +27,24 @@ import io
 import re
 import base64
 import json
+import time
+import textwrap
+import os
 import requests
 from datetime import datetime
+from io import BytesIO
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+import streamlit.components.v1 as components
 
 try:
     import google.generativeai as genai
@@ -485,24 +497,37 @@ def save_songs_df_to_github(df: pd.DataFrame):
     csv_text = df.to_csv(index=False)
     content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
 
-    sha = None
-    r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
-    if r0.status_code == 200:
-        sha = r0.json().get("sha")
+    max_attempts = 3
+    last_error = ""
 
-    msg = f"Update songs database ({datetime.utcnow().isoformat()}Z)"
-    payload = {"message": msg, "content": content_b64, "branch": branch}
-    if sha:
-        payload["sha"] = sha
+    for attempt in range(max_attempts):
+        sha = None
+        r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
+        if r0.status_code == 200:
+            sha = r0.json().get("sha")
 
-    r = requests.put(api_url, headers=_gh_headers(token), data=json.dumps(payload), timeout=20)
+        msg = f"Update songs database ({datetime.utcnow().isoformat()}Z)"
+        payload = {"message": msg, "content": content_b64, "branch": branch}
+        if sha:
+            payload["sha"] = sha
 
-    if r.status_code not in (200, 201):
-        st.error(f"Erro ao salvar banco de músicas no GitHub: {r.status_code} - {r.text}")
-    else:
-        load_songs_df_from_github_csv.clear()
-        st.session_state.songs_df = load_songs_df_from_github_csv()
-        st.success("Banco de músicas salvo no GitHub com sucesso.")
+        r = requests.put(api_url, headers=_gh_headers(token), data=json.dumps(payload), timeout=20)
+
+        if r.status_code in (200, 201):
+            load_songs_df_from_github_csv.clear()
+            st.session_state.songs_df = load_songs_df_from_github_csv()
+            st.success("Banco de músicas salvo no GitHub com sucesso.")
+            return
+
+        last_error = f"{r.status_code} - {r.text}"
+
+        if r.status_code in (409, 422, 500, 502, 503, 504) and attempt < max_attempts - 1:
+            time.sleep(1.2)
+            continue
+
+        break
+
+    st.error(f"Erro ao salvar banco de músicas no GitHub: {last_error}")
 
 
 def list_setlist_files() -> list:
@@ -559,21 +584,35 @@ def save_setlist_df_to_github(setlist_name: str, df: pd.DataFrame):
     csv_text = df.to_csv(index=False)
     content_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
 
-    sha = None
-    r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
-    if r0.status_code == 200:
-        sha = r0.json().get("sha")
+    max_attempts = 3
+    last_error = ""
 
-    msg = f"Update setlist {fn} ({datetime.utcnow().isoformat()}Z)"
-    payload = {"message": msg, "content": content_b64, "branch": branch}
-    if sha:
-        payload["sha"] = sha
+    for attempt in range(max_attempts):
+        sha = None
+        r0 = requests.get(api_url + f"?ref={branch}", headers=_gh_headers(token), timeout=20)
+        if r0.status_code == 200:
+            sha = r0.json().get("sha")
 
-    r = requests.put(api_url, headers=_gh_headers(token), data=json.dumps(payload), timeout=20)
-    if r.status_code not in (200, 201):
-        st.error(f"Erro ao salvar no GitHub: {r.status_code} - {r.text}")
-    else:
-        st.success(f"Setlist salva no GitHub: {fn}")
+        msg = f"Update setlist {fn} ({datetime.utcnow().isoformat()}Z)"
+        payload = {"message": msg, "content": content_b64, "branch": branch}
+        if sha:
+            payload["sha"] = sha
+
+        r = requests.put(api_url, headers=_gh_headers(token), data=json.dumps(payload), timeout=20)
+
+        if r.status_code in (200, 201):
+            st.success(f"Setlist salva no GitHub: {fn}")
+            return
+
+        last_error = f"{r.status_code} - {r.text}"
+
+        if r.status_code in (409, 422, 500, 502, 503, 504) and attempt < max_attempts - 1:
+            time.sleep(1.2)
+            continue
+
+        break
+
+    st.error(f"Erro ao salvar no GitHub: {last_error}")
 
 
 # ==============================================================
@@ -1368,9 +1407,6 @@ def render_setlist_editor_tree():
 def render_song_database():
     st.subheader("Banco de músicas")
 
-    # ----------------------------------------------------------
-    # Inicializa editor
-    # ----------------------------------------------------------
     if "songs_editor_df" not in st.session_state:
         df_init = st.session_state.songs_df.copy().fillna("")
         df_init = df_init.reset_index(drop=True)
@@ -1379,12 +1415,14 @@ def render_song_database():
 
     top_a, top_b = st.columns(2)
 
-    # ----------------------------------------------------------
-    # Adicionar nova música
-    # ----------------------------------------------------------
     with top_a:
         if st.button("➕ Adicionar nova música", use_container_width=True, key="btn_add_song_row"):
-            df_edit = st.session_state.songs_editor_df.copy().fillna("")
+            current_df = st.session_state.get("songs_data_editor", st.session_state.songs_editor_df)
+
+            if isinstance(current_df, pd.DataFrame):
+                df_edit = current_df.copy().fillna("")
+            else:
+                df_edit = st.session_state.songs_editor_df.copy().fillna("")
 
             new_row = {
                 "Título": "",
@@ -1400,9 +1438,6 @@ def render_song_database():
             st.session_state.songs_editor_df = df_edit
             st.rerun()
 
-    # ----------------------------------------------------------
-    # Recarregar do GitHub
-    # ----------------------------------------------------------
     with top_b:
         if st.button("🔄 Recarregar do GitHub", use_container_width=True, key="btn_reload_songs"):
             load_songs_df_from_github_csv.clear()
@@ -1416,10 +1451,6 @@ def render_song_database():
 
     st.caption("Você pode editar diretamente a tabela abaixo e depois salvar no GitHub.")
 
-    # ----------------------------------------------------------
-    # Data editor
-    # IMPORTANTE: não ordenar aqui
-    # ----------------------------------------------------------
     df_editable = st.session_state.songs_editor_df.copy().fillna("")
 
     edited_df = st.data_editor(
@@ -1440,21 +1471,17 @@ def render_song_database():
         },
     )
 
-    edited_df = edited_df.fillna("")
-    st.session_state.songs_editor_df = edited_df.copy()
+    if isinstance(edited_df, pd.DataFrame):
+        edited_df = edited_df.fillna("")
+        st.session_state.songs_editor_df = edited_df.copy()
 
     save_col1, save_col2 = st.columns([1, 2])
 
-    # ----------------------------------------------------------
-    # Salvar banco
-    # ----------------------------------------------------------
     with save_col1:
         if st.button("💾 Salvar banco de músicas", use_container_width=True, key="btn_save_songs_db"):
             df_to_save = st.session_state.songs_editor_df.copy().fillna("")
-
             df_to_save = df_to_save.drop(columns=["_row_id"], errors="ignore")
 
-            # remove linhas totalmente vazias
             df_to_save = df_to_save[
                 ~(
                     df_to_save["Título"].astype(str).str.strip().eq("") &
@@ -1486,9 +1513,6 @@ def render_song_database():
 
     st.markdown("---")
 
-    # ----------------------------------------------------------
-    # CRIAR TXT NO GOOGLE DRIVE
-    # ----------------------------------------------------------
     with st.expander("Gerar TXT no Drive (para depois colar os IDs na tabela)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
@@ -1591,6 +1615,8 @@ def render_song_database():
                         f"- CifraSimplificadaID: {final_simpl_id}\n\n"
                         f"(Tom_Original: {tom_original} | BPM: {bpm})"
                     )
+            
+
                 
 # ==============================================================
 # 12.5) GEMINI AI — OCR CIFRA (imagem → texto)
@@ -1605,24 +1631,51 @@ import base64
 # 🔧 Corrige linhas de acordes automaticamente (prefixa "| ")
 # --------------------------------------------------------------
 def _fix_chord_lines(text: str) -> str:
-    lines = text.splitlines()
+    """
+    Detecta linhas que parecem conter somente acordes e adiciona '| ' no início.
+    Mais robusto para cifras com:
+    C7(9), Bm7(b5), G/B, A7/13, F#, Bb, etc.
+    """
+    lines = (text or "").splitlines()
     out = []
 
-    chord_pattern = re.compile(
-        r'^([A-G][#b]?(m|maj|min|sus|dim|aug|add|\d+)?(\([^\)]*\))?\s+)+$'
+    chord_token_pattern = re.compile(
+        r"""
+        ^
+        [A-G]                # nota
+        [#b]?                # acidente opcional
+        (?:                  # sufixos opcionais
+            maj|min|m|sus|dim|aug|add|M|
+            2|4|5|6|7|9|11|13
+        )*
+        (?:[+\-]\d+)?        # ex: 7+, 5-
+        (?:\([^\)]*\))*      # ex: (9), (b5), (13)
+        (?:/[A-G][#b]?)?     # slash chord ex: G/B
+        $
+        """,
+        re.VERBOSE,
     )
 
     for line in lines:
-        stripped = line.strip()
+        raw = line.rstrip("\n")
+        stripped = raw.strip()
 
-        if chord_pattern.match(stripped):
-            if not stripped.startswith("|"):
-                line = "| " + line
+        if not stripped:
+            out.append(raw)
+            continue
 
-        out.append(line)
+        if stripped.startswith("|"):
+            out.append(raw)
+            continue
+
+        tokens = stripped.split()
+
+        if tokens and all(chord_token_pattern.match(tok) for tok in tokens):
+            out.append("| " + raw)
+        else:
+            out.append(raw)
 
     return "\n".join(out)
-
 
 # --------------------------------------------------------------
 # 🔮 Prompt otimizado para cifras
@@ -1692,9 +1745,10 @@ def render_gemini_ocr_section():
 
     st.markdown("## 🧠 Gemini AI — OCR de Cifras")
 
-    # -------------------------
-    # configuração API
-    # -------------------------
+    if genai is None:
+        st.error("❌ Pacote google-generativeai não disponível no ambiente.")
+        return
+
     api_key = st.secrets.get("gemini_api_key")
     if not api_key:
         st.error("❌ gemini_api_key não encontrada no st.secrets")
@@ -1702,9 +1756,6 @@ def render_gemini_ocr_section():
 
     genai.configure(api_key=api_key)
 
-    # -------------------------
-    # modelos
-    # -------------------------
     if st.button("🔍 Listar modelos disponíveis", key="btn_list_models_ocr"):
         st.session_state._gemini_models = _list_models()
 
@@ -1722,9 +1773,6 @@ def render_gemini_ocr_section():
 
     st.info("💡 Recomendado: models/gemini-2.0-flash")
 
-    # -------------------------
-    # upload imagem
-    # -------------------------
     file = st.file_uploader(
         "Envie imagem da cifra",
         type=["jpg", "jpeg", "png"],
@@ -1734,58 +1782,40 @@ def render_gemini_ocr_section():
     if not file:
         return
 
-    # ✅ use getvalue() (não consome o buffer igual read())
     image_bytes = file.getvalue()
-
-    # ✅ assinatura simples pra detectar troca de arquivo
     file_sig = (file.name, file.size, getattr(file, "type", ""), hash(image_bytes[:2048]))
 
-    # ✅ se trocou a imagem, limpa o resultado antigo automaticamente
     if st.session_state.get("_gemini_last_file_sig") != file_sig:
         st.session_state._gemini_last_file_sig = file_sig
         st.session_state._gemini_result = None
 
     st.image(image_bytes, caption="Pré-visualização", use_column_width=True)
 
-    # -------------------------
-    # transcrever
-    # -------------------------
     if st.button("🚀 Transcrever cifra", key="btn_transcribe_ocr"):
-
-        # ✅ força “refazer” mesmo se já tinha resultado
         st.session_state._gemini_result = None
 
         with st.spinner("Gemini analisando..."):
             try:
                 text = _transcribe_image(image_bytes, model_name)
-
                 st.session_state._gemini_result = text
-
             except Exception as e:
                 st.error(f"Erro Gemini:\n\n{e}")
                 return
 
-    # -------------------------
-    # resultado
-    # -------------------------
     result = st.session_state.get("_gemini_result")
 
     if result:
         st.markdown("### 📄 Resultado")
 
-        # CSS: mira exatamente o textarea pelo label (aria-label)
         st.markdown("""
         <style>
           textarea[aria-label="Cifra transcrita"]{
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
-
             font-size: clamp(10px, 1.4vw, 14px) !important;
             line-height: 1.25 !important;
-
             white-space: pre !important;
             overflow-x: auto !important;
             overflow-y: auto !important;
-
             overflow-wrap: normal !important;
             word-break: normal !important;
           }

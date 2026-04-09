@@ -2875,31 +2875,22 @@ def fullscreen_slides_viewer(slides, titles=None, start_index=0, height=900):
     components.html(html, height=height, scrolling=False)
 
 # ==============================================================
-# 13.6) PDF EXPORT — IGUAL AO PREVIEW (Página atual + Setlist inteira)
-#   ✅ Corrigido:
-#   - Layout mais parecido com o preview (header + linhas + caixas)
-#   - Caixa da cifra com altura dinâmica (usa o espaço que sobra)
-#   - Auto-fit da cifra por LARGURA e ALTURA (não corta / não “sobra”)
-#   - Fonte mono com suporte a acentos (tenta DejaVuSansMono; fallback Courier)
+# 13.6) PDF EXPORT — IGUAL AO PREVIEW
 # ==============================================================
 
-# -----------------------------
-# Fonte (mono) com acentos
-# -----------------------------
-PDF_FONT_REG = {"name": "Courier", "bold": "Courier-Bold"}  # fallback
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
+import textwrap
+
+PDF_FONT_REG = {"name": "Courier", "bold": "Courier-Bold"}
 
 def _ensure_pdf_font():
-    """
-    Tenta registrar DejaVuSansMono (mono, boa p/ cifra, com acentos).
-    Se não existir, usa Courier padrão.
-    """
     global PDF_FONT_REG
-
-    candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",  # repetido ok
-    ]
 
     mono_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
     mono_bold_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
@@ -2911,20 +2902,13 @@ def _ensure_pdf_font():
         if os.path.exists(mono_bold_path):
             pdfmetrics.registerFont(TTFont("PDLMono-Bold", mono_bold_path))
             PDF_FONT_REG["bold"] = "PDLMono-Bold"
-        # se registrou pelo menos a normal, já melhora bastante
     except Exception:
         PDF_FONT_REG = {"name": "Courier", "bold": "Courier-Bold"}
 
 _ensure_pdf_font()
 
 
-# -----------------------------
-# Helpers de texto
-# -----------------------------
 def _wrap_text_lines(s: str, max_chars: int):
-    """
-    Wrap por caracteres (mono). Preserva quebras e linhas vazias.
-    """
     s = (s or "")
     if not s.strip():
         return [""]
@@ -2954,22 +2938,15 @@ def _max_line_width_pt(lines, font_name, font_size):
 
 
 def _calc_mono_font_size_fit(lines, box_w_pt, box_h_pt, font_name, max_fs=12, min_fs=6, padding_pt=10):
-    """
-    Auto-fit igual ao preview:
-    - reduz fonte até CABER na largura e na altura da caixa.
-    - considera leading ~ 1.25x
-    """
     lines = lines if lines else [""]
 
     usable_w = max(1, box_w_pt - padding_pt)
     usable_h = max(1, box_h_pt - padding_pt)
 
-    for fs in [x / 2 for x in range(int(max_fs * 2), int(min_fs * 2) - 1, -1)]:  # step 0.5
-        # largura
+    for fs in [x / 2 for x in range(int(max_fs * 2), int(min_fs * 2) - 1, -1)]:
         if _max_line_width_pt(lines, font_name, fs) > usable_w:
             continue
 
-        # altura
         leading = fs * 1.25
         total_h = len(lines) * leading
         if total_h > usable_h:
@@ -2980,20 +2957,9 @@ def _calc_mono_font_size_fit(lines, box_w_pt, box_h_pt, font_name, max_fs=12, mi
     return min_fs
 
 
-# -----------------------------
-# Reuso da lógica do preview (mesma que você já tinha)
-# -----------------------------
 def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
-    """
-    Reusa a MESMA lógica do preview:
-    - pega cifra do Drive ou item['text']
-    - transpõe se precisar
-    - remove '|' só para exibição
-    - calcula próxima música
-    """
     itype = item.get("type", "")
 
-    # PAUSA
     if itype == "pause":
         footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
         next_title = next_artist = next_tom = next_bpm = ""
@@ -3022,7 +2988,6 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
             "next_bpm": next_bpm,
         }
 
-    # MÚSICA
     title = item.get("title", "")
     artist = item.get("artist", "")
     tom = item.get("tom", "")
@@ -3030,7 +2995,6 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
     obs = item.get("obs", "") or ""
     prep = item.get("preparacao", "") or ""
 
-    # cifra (mesmo critério do preview)
     cifra_txt = ""
     use_s = item.get("use_simplificada", False)
     cid = (item.get("cifra_simplificada_id") if use_s else item.get("cifra_id")) or ""
@@ -3046,10 +3010,8 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
     if cifra_txt and tom_original and tom_atual and tom_original != tom_atual:
         cifra_txt = transpose_chord_text(cifra_txt, tom_original, tom_atual)
 
-    # só depois remove o "|" para exibição (igual preview)
     cifra_show = strip_chord_markers_for_display(cifra_txt)
 
-    # próxima
     footer_mode, footer_next_item = get_footer_context(blocks, b_idx, i_idx)
     next_title = next_artist = next_tom = next_bpm = ""
     if footer_mode == "next" and footer_next_item:
@@ -3078,10 +3040,7 @@ def _compose_item_fields(item: dict, blocks, b_idx, i_idx):
     }
 
 
-# -----------------------------
-# Desenho de 1 página (layout “igual preview”)
-# -----------------------------
-def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
+def _draw_item_page(c, fields: dict, page_w, page_h):
     FONT = PDF_FONT_REG["name"]
     FONT_B = PDF_FONT_REG["bold"]
 
@@ -3089,23 +3048,17 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
     top_margin = 14 * mm
     bottom_margin = 14 * mm
 
-    # Áreas principais
     x0 = margin_x
     x1 = page_w - margin_x
     w = x1 - x0
 
     y = page_h - top_margin
 
-    # =========================
-    # HEADER (título + artista) + TOM/BPM à direita
-    # =========================
     c.setFont(FONT_B, 16)
     c.drawString(x0, y, (fields.get("title", "") or "")[:80])
 
-    # TOM/BPM (direita)
     c.setFont(FONT_B, 11)
     c.drawRightString(x1, y, f"TOM: {fields.get('tom','')}")
-    c.setFont(FONT_B, 11)
     c.drawRightString(x1, y - 7 * mm, f"BPM: {fields.get('bpm','')}")
 
     y -= 7 * mm
@@ -3114,48 +3067,30 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
     if fields.get("artist"):
         c.drawString(x0, y, (fields.get("artist", "") or "")[:110])
 
-    # linha separadora (igual preview)
     y -= 6 * mm
     c.setLineWidth(0.8)
     c.line(x0, y, x1, y)
     y -= 7 * mm
 
-    # =========================
-    # OBS.: (label + box com linhas top/bottom)
-    # =========================
     c.setFont(FONT_B, 11)
     c.drawString(x0, y, "OBS.:")
     y -= 5 * mm
 
     obs_font = 10
     c.setFont(FONT, obs_font)
-
-    # heurística por “chars” para wrap (mono)
-    # (aprox. 95 chars cabem bem nessa margem com fonte 10)
     obs_lines = _wrap_text_lines(fields.get("obs", ""), max_chars=95)
 
-    # altura desejada (dinâmica, cap)
-    obs_line_h = obs_font * 1.25
-    obs_pad = 2 * mm
-    obs_max_lines = 6
-    obs_used_lines = min(len(obs_lines), obs_max_lines)
-    obs_box_h = obs_pad * 2 + obs_used_lines * (obs_line_h * 0.3528)  # pt->mm aprox? (vamos desenhar em pt, então melhor em pt)
-    # ↑ Vamos trabalhar em “pt” com o canvas; então vamos calcular em pt abaixo, mais correto.
-
-    # Melhor: define box em pt diretamente
     obs_pad_pt = 6
     obs_line_h_pt = obs_font * 1.25
+    obs_max_lines = 6
     obs_used_lines = max(1, min(len(obs_lines), obs_max_lines))
     obs_box_h_pt = obs_pad_pt * 2 + obs_used_lines * obs_line_h_pt
 
-    # linhas superior/inferior do box
-    # (no preview é border-top/bottom)
     obs_top_y = y
     c.line(x0, obs_top_y, x1, obs_top_y)
     obs_bottom_y = obs_top_y - obs_box_h_pt
     c.line(x0, obs_bottom_y, x1, obs_bottom_y)
 
-    # escreve texto dentro
     tx = c.beginText()
     tx.setTextOrigin(x0, obs_top_y - obs_pad_pt - obs_font)
     tx.setFont(FONT, obs_font)
@@ -3165,11 +3100,8 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
         tx.textLine(ln)
     c.drawText(tx)
 
-    y = obs_bottom_y - 10  # gap
+    y = obs_bottom_y - 10
 
-    # =========================
-    # PREPARAÇÃO (vamos desenhar depois da CIFRA, mas precisamos reservar espaço)
-    # =========================
     prep_font = 10
     prep_lines = _wrap_text_lines(fields.get("prep", ""), max_chars=95)
     prep_max_lines = 6
@@ -3177,25 +3109,15 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
     prep_line_h_pt = prep_font * 1.25
     prep_pad_pt = 6
     prep_box_h_pt = prep_pad_pt * 2 + prep_used_lines * prep_line_h_pt
+    prep_label_h_pt = 11 + 8
 
-    # Label PREPARAÇÃO ocupa ~ (11 + gap)
-    prep_label_h_pt = 11 + 8  # label + respiro
+    footer_h_pt = 34 * mm
+    footer_top_y = bottom_margin + footer_h_pt
 
-    # =========================
-    # FOOTER PRÓXIMA (reservar)
-    # =========================
-    footer_h_pt = 34 * mm  # reserva semelhante ao preview
-    footer_top_y = bottom_margin + footer_h_pt  # linha de separação do footer
-
-    # =========================
-    # CIFRA (caixa ocupa o espaço que sobrar)
-    # =========================
-    # área disponível até antes da preparação + footer
     cifra_top_y = y
-    cifra_bottom_limit = footer_top_y + prep_label_h_pt + prep_box_h_pt + 10  # 10 pt gap
-    cifra_h_pt = max(120, cifra_top_y - cifra_bottom_limit)  # mínimo
+    cifra_bottom_limit = footer_top_y + prep_label_h_pt + prep_box_h_pt + 10
+    cifra_h_pt = max(120, cifra_top_y - cifra_bottom_limit)
 
-    # caixa da cifra (retângulo com borda leve)
     cifra_box_y = cifra_top_y
     cifra_box_h = cifra_h_pt
     cifra_box_w = w
@@ -3203,11 +3125,9 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
     c.setLineWidth(0.8)
     c.rect(x0, cifra_box_y - cifra_box_h, cifra_box_w, cifra_box_h, stroke=1, fill=0)
 
-    # texto da cifra (auto-fit por largura e altura)
     cifra = fields.get("cifra_show", "") or ""
     cifra_lines = cifra.splitlines() if cifra else [""]
 
-    # padding interno
     pad_left = 8
     pad_top = 10
     pad_right = 8
@@ -3224,8 +3144,6 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
     )
 
     leading = fs * 1.25
-
-    # quantas linhas cabem (segurança)
     usable_h = max(1, cifra_box_h - pad_top - pad_bottom)
     max_lines = int(usable_h / leading) if leading > 0 else len(cifra_lines)
     max_lines = max(1, max_lines)
@@ -3239,16 +3157,12 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
         t.textLine((ln or "").rstrip("\n"))
     c.drawText(t)
 
-    y = (cifra_box_y - cifra_box_h) - 12  # gap
+    y = (cifra_box_y - cifra_box_h) - 12
 
-    # =========================
-    # PREPARAÇÃO (label + box com linhas top/bottom)
-    # =========================
     c.setFont(FONT_B, 11)
     c.drawString(x0, y, "PREPARAÇÃO:")
     y -= 5 * mm
 
-    # box (linhas sup/inf)
     c.setFont(FONT, prep_font)
 
     prep_top_y = y
@@ -3265,72 +3179,23 @@ def _draw_item_page(c: canvas.Canvas, fields: dict, page_w, page_h):
         tp.textLine(ln)
     c.drawText(tp)
 
-    # =========================
-    # FOOTER PRÓXIMA
-    # =========================
-    # linha do footer
     c.setLineWidth(0.8)
     c.line(x0, footer_top_y, x1, footer_top_y)
 
     c.setFont(FONT_B, 11)
     c.drawString(x0, footer_top_y - 12, "PRÓXIMA:")
 
-    # texto da próxima
     c.setFont(FONT, 10)
     nxt = (fields.get("next_title", "") or "")
     if fields.get("next_artist"):
         nxt += f" – {fields.get('next_artist','')}"
     c.drawString(x0, footer_top_y - 24, nxt[:140])
 
-    # TOM/BPM da próxima (direita)
     c.setFont(FONT, 10)
     c.drawRightString(x1, footer_top_y - 12, f"TOM: {fields.get('next_tom','')}")
     c.drawRightString(x1, footer_top_y - 24, f"BPM: {fields.get('next_bpm','')}")
-
-
-# -----------------------------
-# PDF: Página atual
-# -----------------------------
-def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Preview"):
-    buf = BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    w, h = A4
-
-    fields = _compose_item_fields(item, blocks, b_idx, i_idx)
-    _draw_item_page(c, fields, w, h)
-
-    c.showPage()
-    c.save()
-    pdf_bytes = buf.getvalue()
-    buf.close()
-
-    return pdf_bytes, f"{filename_base}.pdf"
-
-
-# -----------------------------
-# PDF: Setlist inteira
-# -----------------------------
-def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
-    buf = BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    w, h = A4
-
-    # achata tudo em ordem
-    flat = []
-    for b_idx, block in enumerate(blocks):
-        for i_idx, it in enumerate(block.get("items", [])):
-            flat.append((b_idx, i_idx, it))
-
-    for (b_idx, i_idx, it) in flat:
-        fields = _compose_item_fields(it, blocks, b_idx, i_idx)
-        _draw_item_page(c, fields, w, h)
-        c.showPage()
-
-    c.save()
-    pdf_bytes = buf.getvalue()
-    buf.close()
-
-    return pdf_bytes, f"{filename_base}.pdf"
+    
+    
 
 # ==============================================================
 # 14) HOME

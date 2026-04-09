@@ -1874,7 +1874,7 @@ def render_song_database():
                          "Nenhum arquivo foi criado no Drive. "
                          "Verifique o folder_id, a permissão da pasta e se a service account foi adicionada corretamente."
                      )
-              else:
+                 else:
                      st.success("Arquivos TXT criados no Drive.")
                     st.info(
                          f"Agora cole estes IDs na tabela acima:\n\n"

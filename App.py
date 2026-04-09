@@ -27,24 +27,16 @@ import io
 import re
 import base64
 import json
-import time
-import textwrap
-import os
 import requests
 from datetime import datetime
-from io import BytesIO
 
-from google.oauth2.service_account import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from google.oauth2.credentials import Credentials as UserCredentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import Flow
+
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-import streamlit.components.v1 as components
 
 try:
     import google.generativeai as genai
@@ -300,67 +292,190 @@ REGRAS DE FORMATAÇÃO (IMPORTANTES):
 # 4) GOOGLE DRIVE – ARQUIVOS .TXT (CIFRAS)
 # ==============================================================
 
+# ==============================================================
+# 4) GOOGLE DRIVE – OAUTH + ARQUIVOS .TXT (CIFRAS)
+# ==============================================================
+
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 DRIVE_FOLDER_FALLBACK = "1-Y_drtD4sPWwg4YJ4gcy0oHr2CgIqO_u"
 
 
-def get_drive_folder_id():
+def get_drive_folder_id() -> str:
     try:
-        folder_id = st.secrets.get("drive", {}).get("folder_id", "")
-        folder_id = str(folder_id).strip()
-        if folder_id:
-            return folder_id
+        return st.secrets.get("drive", {}).get("folder_id", DRIVE_FOLDER_FALLBACK)
     except Exception:
-        pass
-    return DRIVE_FOLDER_FALLBACK
+        return DRIVE_FOLDER_FALLBACK
+
+
+def get_google_oauth_redirect_uri() -> str:
+    try:
+        return st.secrets["google_oauth"]["redirect_uri"]
+    except Exception:
+        # ajuste se necessário
+        return "http://localhost:8501"
+
+
+def get_google_oauth_client_config() -> dict:
+    return {
+        "web": {
+            "client_id": st.secrets["google_oauth"]["client_id"],
+            "client_secret": st.secrets["google_oauth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [get_google_oauth_redirect_uri()],
+        }
+    }
+
+
+def build_google_oauth_flow(state=None) -> Flow:
+    flow = Flow.from_client_config(
+        get_google_oauth_client_config(),
+        scopes=DRIVE_SCOPES,
+        state=state,
+    )
+    flow.redirect_uri = get_google_oauth_redirect_uri()
+    return flow
+
+
+def get_google_auth_url():
+    flow = build_google_oauth_flow()
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+    st.session_state.google_oauth_state = state
+    return auth_url
+
+
+def save_user_credentials_to_session(creds):
+    st.session_state.google_user_creds = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": list(creds.scopes) if creds.scopes else DRIVE_SCOPES,
+    }
+
+
+def get_user_credentials():
+    data = st.session_state.get("google_user_creds")
+    if not data:
+        return None
+
+    creds = UserCredentials(
+        token=data.get("token"),
+        refresh_token=data.get("refresh_token"),
+        token_uri=data.get("token_uri"),
+        client_id=data.get("client_id"),
+        client_secret=data.get("client_secret"),
+        scopes=data.get("scopes"),
+    )
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            save_user_credentials_to_session(creds)
+        except Exception as e:
+            st.warning(f"Sua sessão Google expirou. Conecte novamente. Detalhe: {e}")
+            return None
+
+    return creds
+
+
+def handle_google_oauth_callback():
+    qp = st.query_params
+    code = qp.get("code")
+    returned_state = qp.get("state")
+
+    if not code:
+        return
+
+    expected_state = st.session_state.get("google_oauth_state")
+    if expected_state and returned_state and returned_state != expected_state:
+        st.error("Falha de validação do OAuth (state inválido).")
+        return
+
+    try:
+        flow = build_google_oauth_flow(state=expected_state)
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        save_user_credentials_to_session(creds)
+
+        # limpa query params após login
+        st.query_params.clear()
+        st.success("Google Drive conectado com sucesso.")
+    except Exception as e:
+        st.error(f"Erro ao concluir login com Google: {e}")
+
+
+def disconnect_google_drive():
+    st.session_state.pop("google_user_creds", None)
+    st.session_state.pop("google_oauth_state", None)
+
+
+def render_google_drive_auth_box():
+    st.markdown("### Google Drive")
+    creds = get_user_credentials()
+
+    if creds:
+        st.success("Google Drive conectado.")
+        if st.button("Desconectar Google Drive", key="btn_disconnect_google_drive"):
+            disconnect_google_drive()
+            st.rerun()
+    else:
+        auth_url = get_google_auth_url()
+        st.link_button("Conectar Google Drive", auth_url, use_container_width=True)
 
 
 def get_drive_service():
+    """
+    Prioridade:
+    1) OAuth do usuário
+    2) Service account (fallback)
+    """
+    user_creds = get_user_credentials()
+    if user_creds:
+        return build("drive", "v3", credentials=user_creds)
+
     secrets = st.secrets["gcp_service_account"]
     scopes = ["https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
+    creds = ServiceAccountCredentials.from_service_account_info(secrets, scopes=scopes)
     return build("drive", "v3", credentials=creds)
 
 
 def ensure_file_in_folder(service, file_id: str, folder_id: str):
-    """
-    Garante que o arquivo esteja na pasta desejada.
-    Se não estiver, tenta mover para lá.
-    """
     try:
-        meta = (
-            service.files()
-            .get(
-                fileId=file_id,
-                fields="id, name, parents",
-                supportsAllDrives=True
-            )
-            .execute()
-        )
+        meta = service.files().get(
+            fileId=file_id,
+            fields="id, parents",
+            supportsAllDrives=True
+        ).execute()
 
-        current_parents = meta.get("parents", []) or []
+        parents = meta.get("parents", []) or []
+        if folder_id in parents:
+            return
 
-        if folder_id in current_parents:
-            return True
-
-        previous_parents = ",".join(current_parents) if current_parents else ""
+        previous_parents = ",".join(parents) if parents else None
 
         service.files().update(
             fileId=file_id,
             addParents=folder_id,
             removeParents=previous_parents,
             fields="id, parents",
-            supportsAllDrives=True
+            supportsAllDrives=True,
         ).execute()
 
-        return True
-
-    except Exception as e:
-        st.warning(f"Não foi possível mover o arquivo para a pasta correta no Drive: {e}")
-        return False
+    except Exception:
+        # se não conseguir mover, deixa seguir para não quebrar leitura antiga
+        pass
 
 
 def create_chord_in_drive(filename, content):
     """Cria um novo .txt no Drive e retorna o FileID."""
+    content = content if content is not None else ""
+
     try:
         service = get_drive_service()
         folder_id = get_drive_folder_id()
@@ -371,7 +486,7 @@ def create_chord_in_drive(filename, content):
             "parents": [folder_id],
         }
 
-        fh = io.BytesIO((content or "").encode("utf-8"))
+        fh = io.BytesIO(content.encode("utf-8"))
         media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
 
         file = (
@@ -380,7 +495,7 @@ def create_chord_in_drive(filename, content):
                 body=file_metadata,
                 media_body=media,
                 fields="id, name, parents",
-                supportsAllDrives=True
+                supportsAllDrives=True,
             )
             .execute()
         )
@@ -401,6 +516,10 @@ def load_chord_from_drive(file_id: str) -> str:
 
     try:
         service = get_drive_service()
+        folder_id = get_drive_folder_id()
+
+        ensure_file_in_folder(service, file_id, folder_id)
+
         request = service.files().get_media(
             fileId=file_id,
             supportsAllDrives=True
@@ -408,6 +527,7 @@ def load_chord_from_drive(file_id: str) -> str:
 
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
+
         done = False
         while not done:
             _, done = downloader.next_chunk()
@@ -419,31 +539,27 @@ def load_chord_from_drive(file_id: str) -> str:
         return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
 
 
-def save_chord_to_drive(file_id: str, content: str) -> bool:
-    """
-    Atualiza o TXT no Drive.
-    Retorna True se salvou com sucesso e False se falhou.
-    """
+def save_chord_to_drive(file_id: str, content: str):
     if not file_id:
-        st.error("ID do arquivo no Drive não informado.")
+        st.error("File ID vazio. Não foi possível salvar.")
         return False
 
     file_id = str(file_id).strip()
+    content = content if content is not None else ""
 
     try:
         service = get_drive_service()
         folder_id = get_drive_folder_id()
 
-        # garante que o arquivo esteja na pasta correta antes de editar
         ensure_file_in_folder(service, file_id, folder_id)
 
-        fh = io.BytesIO((content or "").encode("utf-8"))
+        fh = io.BytesIO(content.encode("utf-8"))
         media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
 
         service.files().update(
             fileId=file_id,
             media_body=media,
-            supportsAllDrives=True
+            supportsAllDrives=True,
         ).execute()
 
         load_chord_from_drive.clear()
@@ -453,7 +569,6 @@ def save_chord_to_drive(file_id: str, content: str) -> bool:
     except Exception as e:
         st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
         return False
-
 
 # ==============================================================
 # 5) GITHUB – CSV BANCO + CSV SETLISTS
@@ -964,11 +1079,7 @@ def render_selected_item_editor():
     st.markdown("---")
     st.markdown(f"#### Detalhes do item (Bloco {b_idx+1}, posição {i_idx+1})")
 
-    # ==========================================================
-    # 🎵 MÚSICA
-    # ==========================================================
     if item.get("type") == "music":
-
         title = item.get("title", "Nova música")
         artist = item.get("artist", "")
 
@@ -976,9 +1087,6 @@ def render_selected_item_editor():
         if artist:
             st.caption(artist)
 
-        # ------------------------------------------------------
-        # Alternar original / simplificada
-        # ------------------------------------------------------
         use_simplificada = item.get("use_simplificada", False)
         btn_label = "Usar cifra ORIGINAL" if use_simplificada else "Usar cifra SIMPLIFICADA"
 
@@ -990,11 +1098,7 @@ def render_selected_item_editor():
         cifra_id = (item.get("cifra_id", "") or "").strip()
         cifra_simplificada_id = (item.get("cifra_simplificada_id", "") or "").strip()
 
-        # ======================================================
-        # ✨ EDITOR DE CIFRA (NOVO VISUAL)
-        # ======================================================
         with st.expander("Ver / editar cifra (texto)", expanded=True):
-
             if item.get("use_simplificada") and cifra_simplificada_id:
                 current_id = cifra_simplificada_id
             elif cifra_id:
@@ -1004,29 +1108,19 @@ def render_selected_item_editor():
 
             cifra_text = load_chord_from_drive(current_id) if current_id else item.get("text", "")
 
-            # --------------------------------------------------
-            # CSS RESPONSIVO (igual preview)
-            # --------------------------------------------------
             st.markdown(
                 """
 <style>
 .pdl-cifra-editor textarea {
-
-  /* mesma fonte do preview */
   font-family: "Courier New", monospace;
-  /* nunca quebrar linha */
   white-space: pre !important;
   overflow-x: auto !important;
   overflow-y: auto !important;
   word-break: normal !important;
   overflow-wrap: normal !important;
   text-wrap: nowrap !important;
-
-  /* tamanho automático */
-  font-size: clamp(4px, 1.6vw, 14px) !important;
+  font-size: clamp(10px, 1.6vw, 14px) !important;
   line-height: 1.25 !important;
-
-  /* altura proporcional à tela */
   height: 60vh !important;
   min-height: 220px !important;
 }
@@ -1035,7 +1129,6 @@ def render_selected_item_editor():
                 unsafe_allow_html=True,
             )
 
-            # wrapper para aplicar CSS só neste textarea
             st.markdown('<div class="pdl-cifra-editor">', unsafe_allow_html=True)
 
             edited = st.text_area(
@@ -1047,19 +1140,16 @@ def render_selected_item_editor():
 
             st.markdown("</div>", unsafe_allow_html=True)
 
-        if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
-            if current_id:
-               ok = save_chord_to_drive(current_id, edited)
-               if ok:
-                   st.rerun()
-            else:
-                 item["text"] = edited
-                 st.success("Cifra salva apenas neste setlist.")
-                 st.rerun()
+            if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
+                if current_id:
+                    ok = save_chord_to_drive(current_id, edited)
+                    if ok:
+                        st.rerun()
+                else:
+                    item["text"] = edited
+                    st.success("Cifra salva apenas neste setlist.")
+                    st.rerun()
 
-        # ======================================================
-        # BPM + TOM
-        # ======================================================
         bpm_val = item.get("bpm", "")
         tom_original = item.get("tom_original", "") or item.get("tom", "")
         tom_val = item.get("tom", tom_original)
@@ -1094,9 +1184,6 @@ def render_selected_item_editor():
             st.session_state.current_item = (b_idx, i_idx)
             st.rerun()
 
-        # ======================================================
-        # OBS / PREPARAÇÃO
-        # ======================================================
         st.markdown("---")
         st.markdown("#### Observações / Preparação")
 
@@ -1114,12 +1201,8 @@ def render_selected_item_editor():
             key=f"prep_sel_{b_idx}_{i_idx}",
         )
 
-    # ==========================================================
-    # ⏸ PAUSA
-    # ==========================================================
     else:
         st.markdown("**⏸ Pausa**")
-
         item["label"] = st.text_input(
             "Descrição da pausa",
             value=item.get("label", "Pausa"),
@@ -1509,77 +1592,205 @@ def render_setlist_editor_tree():
 def render_song_database():
     st.subheader("Banco de músicas")
 
-    # ----------------------------------------------------------
-    # Inicializa editor
-    # ----------------------------------------------------------
+    render_google_drive_auth_box()
+
     if "songs_editor_df" not in st.session_state:
         df_init = st.session_state.songs_df.copy().fillna("")
         df_init = df_init.reset_index(drop=True)
         df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
         st.session_state.songs_editor_df = df_init
 
-    # ----------------------------------------------------------
-    # DIALOG 1 — FORMULÁRIO NOVA MÚSICA
-    # ----------------------------------------------------------
-    @st.dialog("Adicionar nova música", width="large")
-    def new_song_form_dialog():
-        form_data = st.session_state.get("new_song_form_data", {})
+    top_a, top_b = st.columns(2)
 
-        title = st.text_input("Título", value=form_data.get("title", ""), key="dlg_song_title")
-        artist = st.text_input("Artista", value=form_data.get("artist", ""), key="dlg_song_artist")
+    with top_a:
+        if st.button("➕ Adicionar nova música", use_container_width=True, key="btn_add_song_row"):
+            df_edit = st.session_state.songs_editor_df.copy().fillna("")
 
+            new_row = {
+                "Título": "",
+                "Artista": "",
+                "Tom_Original": "",
+                "BPM": "",
+                "CifraDriveID": "",
+                "CifraSimplificadaID": "",
+                "_row_id": f"row_new_{len(df_edit)}_{datetime.utcnow().timestamp()}",
+            }
+
+            df_edit = pd.concat([df_edit, pd.DataFrame([new_row])], ignore_index=True)
+            st.session_state.songs_editor_df = df_edit
+            st.rerun()
+
+    with top_b:
+        if st.button("🔄 Recarregar do GitHub", use_container_width=True, key="btn_reload_songs"):
+            load_songs_df_from_github_csv.clear()
+            df_reload = load_songs_df_from_github_csv().fillna("")
+            df_reload = df_reload.reset_index(drop=True)
+            df_reload["_row_id"] = [f"row_{i}" for i in range(len(df_reload))]
+
+            st.session_state.songs_df = df_reload.drop(columns=["_row_id"], errors="ignore").copy()
+            st.session_state.songs_editor_df = df_reload.copy()
+            st.rerun()
+
+    st.caption("Você pode editar diretamente a tabela abaixo e depois salvar no GitHub.")
+
+    df_editable = st.session_state.songs_editor_df.copy().fillna("")
+
+    edited_df = st.data_editor(
+        df_editable,
+        use_container_width=True,
+        height=420,
+        num_rows="dynamic",
+        key="songs_data_editor",
+        hide_index=True,
+        column_config={
+            "Título": st.column_config.TextColumn("Título", required=True),
+            "Artista": st.column_config.TextColumn("Artista"),
+            "Tom_Original": st.column_config.TextColumn("Tom_Original"),
+            "BPM": st.column_config.TextColumn("BPM"),
+            "CifraDriveID": st.column_config.TextColumn("CifraDriveID"),
+            "CifraSimplificadaID": st.column_config.TextColumn("CifraSimplificadaID"),
+            "_row_id": None,
+        },
+    )
+
+    edited_df = edited_df.fillna("")
+    st.session_state.songs_editor_df = edited_df.copy()
+
+    save_col1, save_col2 = st.columns([1, 2])
+
+    with save_col1:
+        if st.button("💾 Salvar banco de músicas", use_container_width=True, key="btn_save_songs_db"):
+            df_to_save = st.session_state.songs_editor_df.copy().fillna("")
+            df_to_save = df_to_save.drop(columns=["_row_id"], errors="ignore")
+
+            df_to_save = df_to_save[
+                ~(
+                    df_to_save["Título"].astype(str).str.strip().eq("") &
+                    df_to_save["Artista"].astype(str).str.strip().eq("") &
+                    df_to_save["Tom_Original"].astype(str).str.strip().eq("") &
+                    df_to_save["BPM"].astype(str).str.strip().eq("") &
+                    df_to_save["CifraDriveID"].astype(str).str.strip().eq("") &
+                    df_to_save["CifraSimplificadaID"].astype(str).str.strip().eq("")
+                )
+            ].copy()
+
+            if "Título" in df_to_save.columns:
+                df_to_save = df_to_save.sort_values(
+                    "Título",
+                    key=lambda s: s.astype(str).str.lower()
+                ).reset_index(drop=True)
+
+            save_songs_df_to_github(df_to_save)
+
+            df_editor_after_save = df_to_save.copy().fillna("")
+            df_editor_after_save["_row_id"] = [f"row_{i}" for i in range(len(df_editor_after_save))]
+
+            st.session_state.songs_df = df_to_save.copy()
+            st.session_state.songs_editor_df = df_editor_after_save.copy()
+            st.rerun()
+
+    with save_col2:
+        st.caption("A ordem alfabética é aplicada ao salvar, para não atrapalhar a edição das linhas novas.")
+
+    st.markdown("---")
+
+    with st.expander("Gerar TXT no Drive (para depois colar os IDs na tabela)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
-            tom_original = st.text_input(
-                "Tom original",
-                value=form_data.get("tom_original", ""),
-                key="dlg_song_tom"
-            )
+            title = st.text_input("Título", key="new_title")
+            artist = st.text_input("Artista", key="new_artist")
         with c2:
-            bpm = st.text_input(
-                "BPM",
-                value=form_data.get("bpm", ""),
-                key="dlg_song_bpm"
-            )
+            tom_original = st.text_input("Tom original (ex.: Fm, C, Gm)", key="new_tom")
+            bpm = st.text_input("BPM", key="new_bpm")
 
-        st.markdown("#### Cifra ORIGINAL")
-        cifra_original = st.text_area(
-            "Texto da cifra original",
-            value=form_data.get("cifra_original", ""),
-            height=220,
-            key="dlg_song_cifra_original"
+        st.markdown("---")
+        st.markdown("#### 1) Cifra ORIGINAL")
+
+        up_orig = st.file_uploader(
+            "Envie imagem (.jpg/.png) ou .txt da cifra original",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_orig",
         )
 
-        st.markdown("#### Cifra SIMPLIFICADA")
-        cifra_simplificada = st.text_area(
-            "Texto da cifra simplificada",
-            value=form_data.get("cifra_simplificada", ""),
+        col_tr1, col_tr2 = st.columns([1, 3])
+        with col_tr1:
+            if st.button("Transcrever com Gemini (Original)", key="btn_tr_orig"):
+                if up_orig is None:
+                    st.warning("Envie uma imagem ou .txt primeiro.")
+                else:
+                    if up_orig.type == "text/plain":
+                        text = up_orig.getvalue().decode("utf-8", errors="replace")
+                    else:
+                        text = transcribe_image_with_gemini(up_orig)
+                    st.session_state.new_song_cifra_original = text
+
+        with col_tr2:
+            st.caption("Se enviar .txt, ele usa o conteúdo direto. Se enviar imagem, o Gemini tenta extrair.")
+
+        st.session_state.new_song_cifra_original = st.text_area(
+            "Texto da cifra ORIGINAL",
+            value=st.session_state.new_song_cifra_original,
             height=220,
-            key="dlg_song_cifra_simplificada"
+            key="txt_orig",
         )
 
-        b1, b2 = st.columns(2)
+        st.markdown("---")
+        st.markdown("#### 2) Cifra SIMPLIFICADA (opcional)")
 
-        if b1.button("Cancelar", use_container_width=True, key="dlg_song_cancel"):
-            st.session_state.new_song_show_form_dialog = False
-            st.rerun()
+        up_simpl = st.file_uploader(
+            "Envie imagem (.jpg/.png) ou .txt da cifra simplificada",
+            type=["jpg", "jpeg", "png", "txt"],
+            key="upload_simpl",
+        )
 
-        if b2.button("Continuar", use_container_width=True, key="dlg_song_continue"):
+        if st.button("Transcrever com Gemini (Simplificada)", key="btn_tr_simpl"):
+            if up_simpl is None:
+                st.warning("Envie uma imagem ou .txt primeiro.")
+            else:
+                if up_simpl.type == "text/plain":
+                    text_s = up_simpl.getvalue().decode("utf-8", errors="replace")
+                else:
+                    text_s = transcribe_image_with_gemini(up_simpl)
+                st.session_state.new_song_cifra_simplificada = text_s
+
+        st.session_state.new_song_cifra_simplificada = st.text_area(
+            "Texto da cifra SIMPLIFICADA",
+            value=st.session_state.new_song_cifra_simplificada,
+            height=220,
+            key="txt_simpl",
+        )
+
+        st.markdown("---")
+        st.markdown("#### 3) Criar arquivos no Drive (TXT)")
+
+        if st.button("Criar TXT no Drive", key="btn_create_txt"):
             if not (title or "").strip():
                 st.warning("Preencha pelo menos o título.")
-                return
+            else:
+                with st.spinner("Criando arquivos no Drive..."):
+                    content_orig = st.session_state.new_song_cifra_original or ""
+                    content_simpl = st.session_state.new_song_cifra_simplificada or ""
 
-            st.session_state.new_song_form_data = {
-                "title": title.strip(),
-                "artist": artist.strip(),
-                "tom_original": tom_original.strip(),
-                "bpm": str(bpm).strip(),
-                "cifra_original": cifra_original or "",
-                "cifra_simplificada": cifra_simplificada or "",
-            }
-            st.session_state.new_song_show_form_dialog = False
-            st.session_state.new_song_show_save_dialog = True
-            st.rerun()
+                    final_cifra_id = create_chord_in_drive(
+                        f"{title} - {artist} (Original)",
+                        content_orig
+                    )
+
+                    final_simpl_id = create_chord_in_drive(
+                        f"{title} - {artist} (Simplificada)",
+                        content_simpl
+                    )
+
+                if not final_cifra_id and not final_simpl_id:
+                    st.error("Nenhum arquivo foi criado no Drive. Verifique o login Google, a pasta e as permissões.")
+                else:
+                    st.success("TXT criado no Drive.")
+                    st.info(
+                        f"Agora cole estes IDs na tabela acima:\n\n"
+                        f"- CifraDriveID: {final_cifra_id}\n"
+                        f"- CifraSimplificadaID: {final_simpl_id}\n\n"
+                        f"(Tom_Original: {tom_original} | BPM: {bpm})"
+                    )
 
     # ----------------------------------------------------------
     # DIALOG 2 — DESTINO DOS TXT
@@ -2120,7 +2331,6 @@ def get_footer_context(blocks, cur_block_idx, cur_item_idx):
 
 
 def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
-
     title = item.get("title", "")
     artist = item.get("artist", "")
     bpm = item.get("bpm", "")
@@ -2174,12 +2384,12 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
 <style>
   html, body {{
-      margin: 0;
-      padding: 0;
-      background: white;
-      color: #111;
-      overflow-x: hidden;
-      overflow-y: hidden;
+      margin:0;
+      padding:0;
+      background:white;
+      color:#111;
+      overflow-x:hidden;
+      overflow-y:hidden;
   }}
 
   body {{
@@ -2187,96 +2397,94 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   }}
 
   .outer {{
-      width: 100%;
-      overflow-x: hidden;
-      padding: 0;
-      margin: 0;
+      width:100%;
+      overflow-x:hidden;
+      padding:0;
+      margin:0;
   }}
 
   .scale-root {{
-      width: max-content;
-      height: max-content;
+      width:max-content;
+      height:max-content;
       transform-origin: top left;
   }}
 
   .sheet {{
-      width: clamp(90%, 100%, 100%);
+      width:clamp(90%, 100%, 100%);
       aspect-ratio: 3 / 4;
-      margin: auto;
-      padding: clamp(5px, 1vw, 10px);
-      box-sizing: border-box;
+      margin:auto;
+      padding:clamp(5px, 1vw, 10px);
+      box-sizing:border-box;
   }}
 
   .top {{
-      display: grid;
+      display:grid;
       grid-template-columns: 1fr auto auto;
-      gap: 10px;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 8px;
+      gap:10px;
+      border-bottom:1px solid #ddd;
+      padding-bottom:8px;
   }}
 
   .title {{
       font-size: clamp(14px, 2.2vw, 22px);
-      font-weight: 800;
+      font-weight:800;
   }}
 
   .artist {{
       font-size: clamp(11px, 1.8vw, 14px);
-      color: #555;
+      color:#555;
   }}
 
   .kv {{
-      text-align: right;
+      text-align:right;
       font-size: clamp(10px, 1.6vw, 13px);
   }}
 
   .section-title {{
-      margin-top: 10px;
-      font-weight: 800;
-      font-size: 12px;
+      margin-top:10px;
+      font-weight:800;
+      font-size:12px;
   }}
 
   .box {{
-      border-top: 1px solid #ddd;
-      border-bottom: 1px solid #ddd;
-      padding: 6px 0;
-      min-height: 20px;
-      font-size: 12px;
-      white-space: pre-wrap;
-      box-sizing: border-box;
+      border-top:1px solid #ddd;
+      border-bottom:1px solid #ddd;
+      padding:6px 0;
+      min-height:20px;
+      font-size:12px;
+      white-space:pre-wrap;
+      box-sizing:border-box;
   }}
 
   .cifra {{
       font-family: "Courier New", monospace;
       white-space: pre;
-      overflow: hidden;
-      margin-top: 10px;
-      padding: 10px;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      font-size: 14px;
-      line-height: 1.25;
-      box-sizing: border-box;
+      overflow:hidden;
+      margin-top:10px;
+      padding:10px;
+      border:1px solid #eee;
+      border-radius:10px;
+      font-size:14px;
+      line-height:1.25;
+      box-sizing:border-box;
       max-width: 100%;
   }}
 
   .next {{
-      margin-top: 12px;
-      border-top: 1px solid #ddd;
-      padding-top: 10px;
-      display: grid;
+      margin-top:12px;
+      border-top:1px solid #ddd;
+      padding-top:10px;
+      display:grid;
       grid-template-columns: 1fr auto auto;
-      gap: 10px;
+      gap:10px;
   }}
 </style>
 </head>
 
 <body>
-
   <div class="outer" id="outer">
     <div class="scale-root" id="scaleRoot">
       <div class="sheet" id="sheet">
-
         <div class="top">
           <div>
             <div class="title">{esc(title)}</div>
@@ -2303,34 +2511,29 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
           <div class="kv"><b>TOM</b><br>{esc(next_tom)}</div>
           <div class="kv"><b>BPM</b><br>{esc(next_bpm)}</div>
         </div>
-
       </div>
     </div>
   </div>
 
 <script>
 (function() {{
-
   const outer = document.getElementById("outer");
   const scaleRoot = document.getElementById("scaleRoot");
   const sheet = document.getElementById("sheet");
+  const box = document.querySelector('.cifra');
 
   function fitSheet() {{
     if (!outer || !scaleRoot || !sheet) return;
 
     scaleRoot.style.transform = "scale(1)";
-
     const contentW = scaleRoot.scrollWidth || sheet.scrollWidth || 1;
     const availW = outer.clientWidth || window.innerWidth || 1;
-
     const scale = Math.min(1, availW / contentW);
-    scaleRoot.style.transform = "scale(" + scale + ")";
 
+    scaleRoot.style.transform = "scale(" + scale + ")";
     const contentH = (scaleRoot.scrollHeight || sheet.scrollHeight || 1) * scale;
     document.body.style.height = contentH + "px";
   }}
-
-  const box = document.querySelector('.cifra');
 
   const MAX = 14;
   const MIN = 8;
@@ -2343,7 +2546,6 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
 
   function fitCifra() {{
     if (!box) return;
-
     let px = MAX;
     box.style.fontSize = px + 'px';
 
@@ -2365,12 +2567,9 @@ def build_sheet_page_html(item, footer_mode, footer_next_item, block_name):
   window.addEventListener('load', runAll);
   window.addEventListener('resize', runAll);
   window.addEventListener('orientationchange', runAll);
-
   runAll();
-
 }})();
 </script>
-
 </body>
 </html>
 """
@@ -3441,37 +3640,31 @@ def main():
     st.markdown(
     """
     <style>
-
-    /* BACKGROUND IMAGE */
     .stApp {
         background-image: linear-gradient(
             rgba(0,0,0,0.80),
             rgba(0,0,0,0.85)
         ),
         url("https://raw.githubusercontent.com/FelipeNovais89/PDLSetlist/main/Data/IMG-20260202-WA0019.jpg");
-
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
         background-attachment: fixed;
     }
-
     </style>
     """,
     unsafe_allow_html=True
     )
-    # ---------- ESTADO INICIAL ----------
-    init_state()
 
-    # ---------- TELA HOME ----------
+    init_state()
+    handle_google_oauth_callback()
+
     if st.session_state.screen == "home":
         render_home()
         return
 
-    # ---------- SIDEBAR ----------
     render_sidebar_navigation()
 
-    # ---------- CABEÇALHO ----------
     top_left, top_right = st.columns([3, 1])
 
     with top_left:
@@ -3484,17 +3677,16 @@ def main():
         )
 
     with top_right:
-        st.info(f"Seção atual: **{ {'setlist':'Setlist', 'banco':'Banco de Músicas', 'cifras':'Gerenciamento de Cifras'}[st.session_state.app_section] }**")
+        st.info(
+            f"Seção atual: **{ {'setlist':'Setlist', 'banco':'Banco de Músicas', 'cifras':'Gerenciamento de Cifras'}[st.session_state.app_section] }**"
+        )
 
     st.markdown("---")
 
-    # ---------- ROTEAMENTO DAS TELAS ----------
     if st.session_state.app_section == "setlist":
         render_setlist_screen()
-
     elif st.session_state.app_section == "banco":
         render_song_database_screen()
-
     elif st.session_state.app_section == "cifras":
         render_chord_management_screen()
 

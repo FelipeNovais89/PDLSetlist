@@ -3195,7 +3195,43 @@ def _draw_item_page(c, fields: dict, page_w, page_h):
     c.drawRightString(x1, footer_top_y - 12, f"TOM: {fields.get('next_tom','')}")
     c.drawRightString(x1, footer_top_y - 24, f"BPM: {fields.get('next_bpm','')}")
     
-    
+
+def make_pdf_for_single_item(item, blocks, b_idx, i_idx, filename_base="PDL_Preview"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    fields = _compose_item_fields(item, blocks, b_idx, i_idx)
+    _draw_item_page(c, fields, w, h)
+
+    c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
+
+
+def make_pdf_for_full_setlist(blocks, filename_base="PDL_Setlist"):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+
+    flat = []
+    for b_idx, block in enumerate(blocks):
+        for i_idx, it in enumerate(block.get("items", [])):
+            flat.append((b_idx, i_idx, it))
+
+    for (b_idx, i_idx, it) in flat:
+        fields = _compose_item_fields(it, blocks, b_idx, i_idx)
+        _draw_item_page(c, fields, w, h)
+        c.showPage()
+
+    c.save()
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return pdf_bytes, f"{filename_base}.pdf"
 
 # ==============================================================
 # 14) HOME

@@ -1876,7 +1876,7 @@ def render_song_database():
                      )
                  else:
                      st.success("Arquivos TXT criados no Drive.")
-                    st.info(
+                     st.info(
                          f"Agora cole estes IDs na tabela acima:\n\n"
                          f"- CifraDriveID: {final_cifra_id}\n"
                          f"- CifraSimplificadaID: {final_simpl_id}\n\n"

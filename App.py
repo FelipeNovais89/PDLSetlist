@@ -300,6 +300,20 @@ REGRAS DE FORMATAÇÃO (IMPORTANTES):
 # 4) GOOGLE DRIVE – ARQUIVOS .TXT (CIFRAS)
 # ==============================================================
 
+DRIVE_FOLDER_FALLBACK = "1-Y_drtD4sPWwg4YJ4gcy0oHr2CgIqO_u"
+
+
+def get_drive_folder_id():
+    try:
+        folder_id = st.secrets.get("drive", {}).get("folder_id", "")
+        folder_id = str(folder_id).strip()
+        if folder_id:
+            return folder_id
+    except Exception:
+        pass
+    return DRIVE_FOLDER_FALLBACK
+
+
 def get_drive_service():
     secrets = st.secrets["gcp_service_account"]
     scopes = ["https://www.googleapis.com/auth/drive"]
@@ -307,18 +321,55 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 
+def ensure_file_in_folder(service, file_id: str, folder_id: str):
+    """
+    Garante que o arquivo esteja na pasta desejada.
+    Se não estiver, tenta mover para lá.
+    """
+    try:
+        meta = (
+            service.files()
+            .get(
+                fileId=file_id,
+                fields="id, name, parents",
+                supportsAllDrives=True
+            )
+            .execute()
+        )
+
+        current_parents = meta.get("parents", []) or []
+
+        if folder_id in current_parents:
+            return True
+
+        previous_parents = ",".join(current_parents) if current_parents else ""
+
+        service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            removeParents=previous_parents,
+            fields="id, parents",
+            supportsAllDrives=True
+        ).execute()
+
+        return True
+
+    except Exception as e:
+        st.warning(f"Não foi possível mover o arquivo para a pasta correta no Drive: {e}")
+        return False
+
+
 def create_chord_in_drive(filename, content):
     """Cria um novo .txt no Drive e retorna o FileID."""
     try:
         service = get_drive_service()
-        folder_id = st.secrets.get("drive", {}).get("folder_id", None)
+        folder_id = get_drive_folder_id()
 
         file_metadata = {
             "name": f"{filename}.txt",
             "mimeType": "text/plain",
+            "parents": [folder_id],
         }
-        if folder_id:
-            file_metadata["parents"] = [folder_id]
 
         fh = io.BytesIO((content or "").encode("utf-8"))
         media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
@@ -328,8 +379,8 @@ def create_chord_in_drive(filename, content):
             .create(
                 body=file_metadata,
                 media_body=media,
-                fields="id,name",
-                supportsAllDrives=True,
+                fields="id, name, parents",
+                supportsAllDrives=True
             )
             .execute()
         )
@@ -345,11 +396,15 @@ def create_chord_in_drive(filename, content):
 def load_chord_from_drive(file_id: str) -> str:
     if not file_id:
         return ""
+
     file_id = str(file_id).strip()
 
     try:
         service = get_drive_service()
-        request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+        request = service.files().get_media(
+            fileId=file_id,
+            supportsAllDrives=True
+        )
 
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -364,65 +419,41 @@ def load_chord_from_drive(file_id: str) -> str:
         return f"Erro ao carregar cifra do Drive (ID: {file_id}):\n{e}"
 
 
-def save_chord_to_drive(file_id: str, content: str):
+def save_chord_to_drive(file_id: str, content: str) -> bool:
+    """
+    Atualiza o TXT no Drive.
+    Retorna True se salvou com sucesso e False se falhou.
+    """
     if not file_id:
-        return
+        st.error("ID do arquivo no Drive não informado.")
+        return False
+
     file_id = str(file_id).strip()
 
     try:
         service = get_drive_service()
+        folder_id = get_drive_folder_id()
+
+        # garante que o arquivo esteja na pasta correta antes de editar
+        ensure_file_in_folder(service, file_id, folder_id)
+
         fh = io.BytesIO((content or "").encode("utf-8"))
         media = MediaIoBaseUpload(fh, mimetype="text/plain", resumable=False)
+
         service.files().update(
             fileId=file_id,
             media_body=media,
             supportsAllDrives=True
         ).execute()
+
         load_chord_from_drive.clear()
+        st.success("Cifra atualizada no Drive.")
+        return True
 
     except Exception as e:
         st.error(f"Erro ao salvar cifra no Drive (ID: {file_id}): {e}")
+        return False
 
-
-def sanitize_txt_filename(name: str) -> str:
-    name = (name or "").strip()
-    name = re.sub(r'[\\/:*?"<>|]+', "", name)
-    name = re.sub(r"\s+", " ", name).strip()
-    return name or "Sem_Titulo"
-
-
-def add_song_row_to_session(song_data: dict, cifra_id: str = "", cifra_simplificada_id: str = ""):
-    """
-    Adiciona uma música ao editor/tabela em memória e reorganiza alfabeticamente.
-    """
-    if "songs_editor_df" not in st.session_state:
-        df_init = st.session_state.songs_df.copy().fillna("")
-        df_init = df_init.reset_index(drop=True)
-        df_init["_row_id"] = [f"row_{i}" for i in range(len(df_init))]
-        st.session_state.songs_editor_df = df_init
-
-    df_edit = st.session_state.songs_editor_df.copy().fillna("")
-
-    new_row = {
-        "Título": song_data.get("title", ""),
-        "Artista": song_data.get("artist", ""),
-        "Tom_Original": song_data.get("tom_original", ""),
-        "BPM": song_data.get("bpm", ""),
-        "CifraDriveID": cifra_id or "",
-        "CifraSimplificadaID": cifra_simplificada_id or "",
-        "_row_id": f"row_new_{datetime.utcnow().timestamp()}",
-    }
-
-    df_edit = pd.concat([df_edit, pd.DataFrame([new_row])], ignore_index=True)
-
-    if "Título" in df_edit.columns:
-        df_edit = df_edit.sort_values(
-            "Título",
-            key=lambda s: s.astype(str).str.lower()
-        ).reset_index(drop=True)
-
-    df_edit["_row_id"] = [f"row_{i}" for i in range(len(df_edit))]
-    st.session_state.songs_editor_df = df_edit
 
 # ==============================================================
 # 5) GITHUB – CSV BANCO + CSV SETLISTS
@@ -1016,14 +1047,15 @@ def render_selected_item_editor():
 
             st.markdown("</div>", unsafe_allow_html=True)
 
-            if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
-                if current_id:
-                    save_chord_to_drive(current_id, edited)
-                    st.success("Cifra atualizada no Drive.")
-                else:
-                    item["text"] = edited
-                    st.success("Cifra salva apenas neste setlist.")
-                st.rerun()
+        if st.button("Salvar cifra", key=f"save_cifra_sel_{b_idx}_{i_idx}"):
+            if current_id:
+               ok = save_chord_to_drive(current_id, edited)
+               if ok:
+                   st.rerun()
+            else:
+                 item["text"] = edited
+                 st.success("Cifra salva apenas neste setlist.")
+                 st.rerun()
 
         # ======================================================
         # BPM + TOM

@@ -1852,32 +1852,36 @@ def render_song_database():
         st.markdown("#### 3) Criar arquivos no Drive (TXT)")
 
         if st.button("Criar TXT no Drive", key="btn_create_txt"):
-            if not (title or "").strip():
-                st.warning("Preencha pelo menos o título.")
-            else:
-                with st.spinner("Criando arquivos no Drive..."):
-                    content_orig = st.session_state.new_song_cifra_original or ""
-                    content_simpl = st.session_state.new_song_cifra_simplificada or ""
+    if not (title or "").strip():
+        st.warning("Preencha pelo menos o título.")
+    else:
+        with st.spinner("Criando arquivos no Drive..."):
+            content_orig = st.session_state.new_song_cifra_original or ""
+            content_simpl = st.session_state.new_song_cifra_simplificada or ""
 
-                    final_cifra_id = create_chord_in_drive(
-                        f"{title} - {artist} (Original)",
-                        content_orig
-                    )
-                    final_simpl_id = create_chord_in_drive(
-                        f"{title} - {artist} (Simplificada)",
-                        content_simpl
-                    )
+            final_cifra_id = create_chord_in_drive(
+                f"{title} - {artist} (Original)",
+                content_orig
+            )
 
-                if not final_cifra_id and not final_simpl_id:
-                    st.error("Nenhum arquivo foi criado no Drive. Verifique st.secrets e permissões.")
-                else:
-                    st.success("TXT criado no Drive.")
-                    st.info(
-                        f"Agora cole estes IDs na tabela acima:\n\n"
-                        f"- CifraDriveID: {final_cifra_id}\n"
-                        f"- CifraSimplificadaID: {final_simpl_id}\n\n"
-                        f"(Tom_Original: {tom_original} | BPM: {bpm})"
-                    )
+            final_simpl_id = create_chord_in_drive(
+                f"{title} - {artist} (Simplificada)",
+                content_simpl
+            )
+
+        if not final_cifra_id and not final_simpl_id:
+            st.error(
+                "Nenhum arquivo foi criado no Drive. "
+                "Verifique o folder_id, a permissão da pasta e se a service account foi adicionada corretamente."
+            )
+        else:
+            st.success("Arquivos TXT criados no Drive.")
+            st.info(
+                f"Agora cole estes IDs na tabela acima:\n\n"
+                f"- CifraDriveID: {final_cifra_id}\n"
+                f"- CifraSimplificadaID: {final_simpl_id}\n\n"
+                f"(Tom_Original: {tom_original} | BPM: {bpm})"
+            )
 
                 
 # ==============================================================
